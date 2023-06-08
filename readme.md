@@ -28,9 +28,37 @@ To use the Chat Transcript Saver extension:
 
 3. Turn on live captions. This is done by clicking on the ellipsis button in the meeting controls, then clicking "Turn on live captions".
 
-4. Click on the extension icon in the address bar, then click "Start Transcription".
+![](IMG/1.png)
+
+4. Click on the extension icon in the address bar, then click "Start Capturing".
+
+![](IMG/2.png)
 
 3. When you're finished, click "Save Transcript". The transcript will be downloaded as a YAML file.
 
-Please note that this extension works on Microsoft Teams pages only, only during the live calls.
-#
+## Sample data exported
+
+Data is exported as a Yaml file. Here's a sample of the data exported:
+
+```
+Name: Denis Molodtsov
+Text: There I'm going to test this feature. Another test, test, test, test.
+Time: 21:55:59
+----
+Name: Denis Molodtsov
+Text: Hi this is a test.
+Time: 21:56:05
+----
+Name: Denis Molodtsov
+Text: Did you get any of this?
+Time: 21:56:08
+----
+Name: Denis Molodtsov
+Text: This is a test
+Time: 21:56:08
+----
+
+```
+
+
+Please note that this extension works on Microsoft Teams pages only during the meetings and only when the live captions are first turned on.

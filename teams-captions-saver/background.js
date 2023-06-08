@@ -12,15 +12,15 @@ function jsonToYaml(json) {
 function toggleTranscription() {
     if (isTranscribing) {
         // If already transcribing, stop the process.
-        console.log("already transcribing, stop the process.");
+        console.log("already capturing, stop the process.");
         isTranscribing = false;
     } else {
         // If not currently transcribing, start the process.
         isTranscribing = true;
         // Message to content script to start transcribing
-        console.log("start transcribing");
+        console.log("start capturing");
         chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-            chrome.tabs.sendMessage(tabs[0].id, {message: "start_transcription"});
+            chrome.tabs.sendMessage(tabs[0].id, {message: "start_capture"});
         });
     }
 }
@@ -45,11 +45,11 @@ function saveTranscripts() {
 // Listen for messages from the popup script or content scripts.
 // Call the appropriate function based on the received message.
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.message === 'toggle_transcription') {
-        console.log('toggle_transcription triggered!');
+    if (request.message === 'toggle_capture') {
+        console.log('toggle_capture triggered!');
         toggleTranscription();
-    } else if (request.message === 'save_transcripts') {
-        console.log('save_transcripts triggered!');
+    } else if (request.message === 'save_captions') {
+        console.log('save_captions triggered!');
         saveTranscripts();
     } else if (request.message === 'update_transcripts') {
         // Update the transcripts received from content.js

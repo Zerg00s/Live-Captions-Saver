@@ -1,15 +1,9 @@
-if (localStorage.getItem("transcripts") !== null) {
-    localStorage.removeItem("transcripts");
-}
+const transcriptArray = [];
 
-const transcriptArray = JSON.parse(localStorage.getItem("transcripts")) || [];
-
-function checkTranscripts() {
+function checkCaptions() {
     const iframe = document.querySelector('iframe');
-    
-    // const transcripts = document.querySelectorAll('.ui-chat__item');
     const transcripts = iframe.contentWindow.document.querySelectorAll('.ui-chat__item');
-    console.log(transcripts);
+
     transcripts.forEach(transcript => {
         const ID = transcript.querySelector('.fui-Flex > .ui-chat__message').id;
         const Name = transcript.querySelector('.ui-chat__message__author').innerText;
@@ -28,20 +22,18 @@ function checkTranscripts() {
             // Add new transcript
             transcriptArray.push({ Name, Text, Time, ID });
         }
-        
+
         // Send the updated transcripts to the background script
         chrome.runtime.sendMessage({message: "update_transcripts", transcripts: transcriptArray});
     });
-
-    localStorage.setItem('transcripts', JSON.stringify(transcriptArray));
 }
 
 let observer = null;
 
 function startTranscription() {
-    observer = new MutationObserver(checkTranscripts);
+    observer = new MutationObserver(checkCaptions);
     observer.observe(document.body, { childList: true, subtree: true });
-    setInterval(checkTranscripts, 3000);
+    setInterval(checkCaptions, 3000);
 }
 
 function stopTranscription() {
@@ -54,11 +46,11 @@ function stopTranscription() {
 // Listen for messages from the background script.
 // Call the appropriate function based on the received message.
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.message === 'start_transcription') {
-        console.log('start_transcription triggered!');
+    if (request.message === 'start_capture') {
+        console.log('start_capture triggered!');
         startTranscription();
-    } else if (request.message === 'stop_transcription') {
-        console.log('stop_transcription triggered!');
+    } else if (request.message === 'stop_capture') {
+        console.log('stop_capture triggered!');
         stopTranscription();
     }
 });

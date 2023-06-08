@@ -8,19 +8,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const buttonText = startStopButton.innerText;
         
         // Send a message to background.js to toggle the transcription
-        chrome.runtime.sendMessage({message: 'toggle_transcription'});
+        chrome.runtime.sendMessage({message: 'toggle_capture'});
 
         // Toggle the button text
-        if (buttonText === 'Start Transcription') {
-            startStopButton.innerText = 'Stop Transcription';
+        if (buttonText === 'Start Capturing') {
+            startStopButton.innerText = 'Stop Capturing';
         } else {
-            startStopButton.innerText = 'Start Transcription';
+            startStopButton.innerText = 'Start Capturing';
         }
-        console.log('toggle_transcription clicked!');
+        console.log('toggle_capture clicked!');
     });
   
     document.getElementById('saveButton').addEventListener('click', function() {
-        console.log('save_transcripts clicked!');
-        chrome.runtime.sendMessage({message: 'save_transcripts'});
+        console.log('save_captions clicked!');
+        chrome.runtime.sendMessage({message: 'save_captions'});
     });
 });
