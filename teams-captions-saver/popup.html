@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+
+<head>
+    <title>Chat Transcript Saver</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f4f4f4;
+            height: 190px; /* Adjust as needed */
+            width: 200px; /* Adjust as needed */
+        }
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            background-color: #007BFF;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #saveButton {
+            background-color: #28a745;
+        }
+        #saveButton:hover {
+            background-color: #1e7e34;
+        }
+    </style>
+    <script src="popup.js"></script>
+</head>
+
+<body>
+    <h2>Captions Saver</h2>
+    <button id="startStopButton">Start Transcription</button>
+    <button id="saveButton">Save Transcript</button>
+</body>
+
+</html>
+
+
