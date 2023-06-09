@@ -5,7 +5,8 @@ if (localStorage.getItem("transcripts") !== null) {
 const transcriptArray = JSON.parse(localStorage.getItem("transcripts")) || [];
 
 function checkTranscripts() {
-    const transcripts = document.querySelectorAll('.ui-chat__item');
+    const iframe = document.querySelector('iframe');
+    const transcripts = iframe.contentWindow.document.querySelectorAll('.ui-chat__item');
     transcripts.forEach(transcript => {
         const ID = transcript.querySelector('.fui-Flex > .ui-chat__message').id;
         const Name = transcript.querySelector('.ui-chat__message__author').innerText;
@@ -32,7 +33,7 @@ function checkTranscripts() {
 const observer = new MutationObserver(checkTranscripts);
 observer.observe(document.body, { childList: true, subtree: true });
 
-setInterval(checkTranscripts, 20000);
+setInterval(checkTranscripts, 10000);
 
 // Download JSON
 function downloadJSON() {
