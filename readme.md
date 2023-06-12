@@ -78,6 +78,13 @@ Time: 21:56:08
 ----
 
 ```
-
+## Standalone JavaScript. When you can't use browser extensions
+But what if you can't use extensions for security reasons? Well, this case:
+- Join a meeting using a browser.
+- Start the live captions using the built-in MS Teams feature.
+- Open the browser console.
+- Paste the [Capture-Teams-Captrions - YAML.js](https://github.com/Zerg00s/Live-Captions-Saver/blob/master/Standalone-scripts/Capture-Teams-Captrions%20-%20YAML.js) into the console and run it.
+- Once you are ready to dowload a transcript, open the console window again and run this command: `downloadYAML();`
+- A text file with a transcript will be downloaded.
 
 Please note that this extension works on Microsoft Teams pages only during the meetings and only when the live captions are first turned on.
