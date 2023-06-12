@@ -79,7 +79,7 @@ Time: 21:56:08
 
 ```
 ## Standalone JavaScript. When you can't use browser extensions
-But what if you can't use extensions for security reasons? Well, this case:
+But what if you can't use extensions for security reasons? Well, in this case:
 - Join a meeting using a browser.
 - Start the live captions using the built-in MS Teams feature.
 - Open the browser console.
