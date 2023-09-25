@@ -7,53 +7,55 @@ function jsonToYaml(json) {
     }).join('\n');
 }
 
-
-// This function will be called by popup.js to start/stop transcription.
 function toggleTranscription() {
     if (isTranscribing) {
-        // If already transcribing, stop the process.
-        console.log("already capturing, stop the process.");
+        // console.log("already capturing, stop the process.");
         isTranscribing = false;
     } else {
-        // If not currently transcribing, start the process.
         isTranscribing = true;
-        // Message to content script to start transcribing
-        console.log("start capturing");
-        chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-            chrome.tabs.sendMessage(tabs[0].id, {message: "start_capture"});
+        // console.log("start capturing");
+        chrome.tabs.query({url: "https://teams.microsoft.com/*"}, function(tabs) {
+            console.log("Tabs query result:", tabs);
+            if (tabs[0]) {
+                console.log("sending message start_capture");
+                chrome.tabs.sendMessage(tabs[0].id, {message: "start_capture"});
+                console.log("message start_capture sent!");
+            }
         });
+        
     }
 }
 
-// This function will be called by popup.js to save the transcripts.
+
+
 function saveTranscripts() {
-    // Convert transcriptArray to YAML format
+    if(transcriptArray === null || transcriptArray.length === 0){
+        // console.log("nothing to save!");
+        return;
+    }
     const yamlContent = jsonToYaml(transcriptArray);
-  
-    // Create data URI for the YAML content
-    const dataURI = "data:text/plain;charset=utf-8," + encodeURIComponent(yamlContent);
-  
-    // Create a link element for the download
-    const downloadLink = document.createElement("a");
-    downloadLink.href = dataURI;
-    downloadLink.download = "transcripts.yaml";
-  
-    // Programmatically click the link to trigger the download
-    downloadLink.click();
+    if(yamlContent){
+        // console.log(yamlContent);
+        // console.log("saving transactions... Sending download_transcripts message:", yamlContent);
+        chrome.runtime.sendMessage({message: 'download_transcripts', data: yamlContent});
+        // console.log("message sent...");
+    }else{
+        // console.log("nothing to save!");
+    }    
 }
 
-// Listen for messages from the popup script or content scripts.
-// Call the appropriate function based on the received message.
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    console.log(request);
     if (request.message === 'toggle_capture') {
-        console.log('toggle_capture triggered!');
+        // console.log('toggle_capture triggered!');
         toggleTranscription();
     } else if (request.message === 'save_captions') {
-        console.log('save_captions triggered!');
+        // console.log('save_captions triggered!');
         saveTranscripts();
     } else if (request.message === 'update_transcripts') {
-        // Update the transcripts received from content.js
-        console.log('update_transcripts received!');
+        // console.log('update_transcripts received!', request.transcripts);
         transcriptArray = request.transcripts;
     }
 });
+
+console.log("listening to toggle_capture, save_captions and update_transcripts");
