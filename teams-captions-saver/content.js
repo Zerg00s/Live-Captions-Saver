@@ -8,7 +8,8 @@ function checkCaptions() {
     if(transcripts && transcripts.length > 0){
 
     }else{
-        alert("Please, click 'More' > 'Language and speech' > 'Turn on life captions'");
+        // alert("Please, click 'More' > 'Language and speech' > 'Turn on life captions'");
+        // console.log("Please, click 'More' > 'Language and speech' > 'Turn on life captions'");
         return;
     }
 
@@ -31,10 +32,7 @@ function checkCaptions() {
                 // Add new transcript
                 transcriptArray.push({ Name, Text, Time, ID });
             }
-    
-            // Send the updated transcripts to the background script
-            console.log("Send the update_transcripts message to the background.js script");
-            chrome.runtime.sendMessage({message: "update_transcripts", transcripts: transcriptArray});
+          
         }
         
     });
@@ -46,7 +44,7 @@ function startTranscription() {
     observer = new MutationObserver(checkCaptions);
     observer.observe(document.body, { childList: true, subtree: true });
     setInterval(checkCaptions, 3000);
-    console.log("checking every 3 seconds");
+    console.log("3️⃣", "checking every 3 seconds");
 }
 
 function stopTranscription() {
@@ -56,16 +54,42 @@ function stopTranscription() {
     }
 }
 
-// Listen for messages from the background script.
+// Listen for messages from the background.js script.
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log(request);
     if (request.message === 'start_capture') {
         console.log('start_capture triggered!');
         startTranscription();
     } else if (request.message === 'stop_capture') {
         console.log('stop_capture triggered!');
         stopTranscription();
+    } else if (request.message === 'save_captions') {
+        saveTranscripts();
     }
 });
 
-console.log("LISTENING in content.js");
+console.log("3️⃣","LISTENING in content.js");
+
+function jsonToYaml(json) {
+    return json.map(entry => {
+        return `Name: ${entry.Name}\nText: ${entry.Text}\nTime: ${entry.Time}\n----`;
+    }).join('\n');
+}
+
+function saveTranscripts() {
+    // Convert transcriptArray to YAML format
+    const yamlContent = jsonToYaml(transcriptArray);
+  
+    // Create data URI for the YAML content
+    const dataURI = "data:text/plain;charset=utf-8," + encodeURIComponent(yamlContent);
+  
+    const tabTitle = document.querySelector('title').innerText;
+
+    // Create a link element for the download
+    const downloadLink = document.createElement("a");
+    downloadLink.href = dataURI;
+    downloadLink.download = `${tabTitle}.yaml`;
+  
+    // Programmatically click the link to trigger the download
+    downloadLink.click();
+}
+
