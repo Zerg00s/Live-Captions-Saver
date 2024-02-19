@@ -5,8 +5,14 @@ if (localStorage.getItem("transcripts") !== null) {
 const transcriptArray = JSON.parse(localStorage.getItem("transcripts")) || [];
 
 function checkTranscripts() {
-    const iframe = document.querySelector('iframe');
-    const transcripts = iframe.contentWindow.document.querySelectorAll('.ui-chat__item');
+    // Teams v2 
+    const closedCaptionsContainer = document.querySelector("[data-tid='closed-captions-renderer']")
+    if (!closedCaptionsContainer) {
+        // alert("Please, click 'More' > 'Language and speech' > 'Turn on life captions'");
+        return;
+    }
+    const transcripts = closedCaptionsContainer.querySelectorAll('.ui-chat__item');
+
     transcripts.forEach(transcript => {
         const ID = transcript.querySelector('.fui-Flex > .ui-chat__message').id;
         const Name = transcript.querySelector('.ui-chat__message__author').innerText;
@@ -18,12 +24,27 @@ function checkTranscripts() {
         if (index > -1) {
             if (transcriptArray[index].Text !== Text) {
                 // Update the transcript if text changed
-                transcriptArray[index] = { Name, Text, Time, ID };
+                transcriptArray[index] = {
+                    Name,
+                    Text,
+                    Time,
+                    ID
+                };
             }
         } else {
-            console.log({ Name, Text, Time, ID });
+            console.log({
+                Name,
+                Text,
+                Time,
+                ID
+            });
             // Add new transcript
-            transcriptArray.push({ Name, Text, Time, ID });
+            transcriptArray.push({
+                Name,
+                Text,
+                Time,
+                ID
+            });
         }
     });
 
@@ -31,7 +52,10 @@ function checkTranscripts() {
 }
 
 const observer = new MutationObserver(checkTranscripts);
-observer.observe(document.body, { childList: true, subtree: true });
+observer.observe(document.body, {
+    childList: true,
+    subtree: true
+});
 
 setInterval(checkTranscripts, 10000);
 
@@ -39,7 +63,10 @@ setInterval(checkTranscripts, 10000);
 function downloadYAML() {
     let transcripts = JSON.parse(localStorage.getItem('transcripts'));
     // Remove IDs
-    transcripts = transcripts.map(({ID, ...rest}) => rest);
+    transcripts = transcripts.map(({
+        ID,
+        ...rest
+    }) => rest);
 
     // Convert to your simple YAML format
     let yamlTranscripts = '';
