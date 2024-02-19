@@ -25,44 +25,29 @@ function saveTranscripts(meetingTitle, transcriptArray) {
 }
 
 
-
 chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     console.log(message);
     switch (message.message) {
-        case 'start_capture':
-            chrome.tabs.query({
-                url: "https://teams.microsoft.com/*"
-            }, function (tabs) {
-                console.log("Tabs query result:", tabs);
-                if (tabs[0]) {
-                    console.log("sending message start_capture");
-                    chrome.tabs.sendMessage(tabs[0].id, {
-                        message: "start_capture"
-                    });
-                    console.log("message start_capture sent!");
-                }
-            });
-            break;
-        case 'download_captions':
+        case 'download_captions': // message from Content script
             console.log('download_captions triggered!', message);
             saveTranscripts(message.meetingTitle, message.transcriptArray);
 
             break;
-        case 'save_captions':
+        case 'save_captions': // message from Popup
             console.log('save_captions triggered!');
 
-            chrome.tabs.query({
-                url: "https://teams.microsoft.com/*"
-            }, function (tabs) {
-                console.log("Tabs query result:", tabs);
-                if (tabs[0]) {
-                    console.log("sending message return_transcript");
-                    chrome.tabs.sendMessage(tabs[0].id, {
-                        message: "return_transcript"
-                    });
-                    console.log("message start_capture sent!");
-                }
+            const [tab] = await chrome.tabs.query({
+                active: true,
+                lastFocusedWindow: true
             });
+            console.log("Tabs query result:", tab);
+
+            console.log("sending message return_transcript");
+            chrome.tabs.sendMessage(tab.id, {
+                message: "return_transcript"
+            });
+
+            console.log("message start_capture sent!");
 
             break;
         default:

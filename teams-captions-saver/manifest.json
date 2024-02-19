@@ -7,14 +7,12 @@
     "128": "icon.png"
   },
   
-  "version": "3.2",
+  "version": "3.3",
   "description": "This extension allows you to capture and save MS Teams live captions. Developed by Denis Molodtsov.",
   "homepage_url": "https://spdenis.com",  
   "permissions": [
     "downloads",
-    "activeTab",    
-    "tabs",
-    "scripting"
+    "activeTab"
   ],
   "host_permissions": [
       "https://teams.microsoft.com/*"
@@ -30,7 +28,7 @@
   "content_scripts": [
     {
       "matches": ["https://teams.microsoft.com/*"],
-      "js": ["content_script-12.js"]
+      "js": ["content_script.js"]
     }
   ]
 }

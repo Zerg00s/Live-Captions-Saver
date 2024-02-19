@@ -6,7 +6,7 @@ function checkCaptions() {
     // Teams v2 
     const closedCaptionsContainer = document.querySelector("[data-tid='closed-captions-renderer']")
     if (!closedCaptionsContainer) {
-        // alert("Please, click 'More' > 'Language and speech' > 'Turn on life captions'");
+        // "Please, click 'More' > 'Language and speech' > 'Turn on life captions'"
         return;
     }
     const transcripts = closedCaptionsContainer.querySelectorAll('.ui-chat__item');
@@ -83,12 +83,8 @@ startTranscription();
 
 // Listen for messages from the service_worker.js script.
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    switch (request.message) {
-        case 'start_capture':
-            console.log('start_capture triggered!');
-            startTranscription();
-            break;
-        case 'return_transcript':
+    switch (request.message) {  // message from service_worker.js      
+        case 'return_transcript': // message from service_worker.js
             console.log("response:", transcriptArray);
             if (!capturing) {
                 alert("Oops! No captions were captured. Please, try again.");
