@@ -1,5 +1,6 @@
 const transcriptArray = [];
 let capturing = false;
+let observer = null;
 
 function checkCaptions() {
     // Teams v2 
@@ -15,7 +16,7 @@ function checkCaptions() {
         if (transcript.querySelector('.ui-chat__message__author') != null) {
             const Name = transcript.querySelector('.ui-chat__message__author').innerText;
             const Text = transcript.querySelector('.fui-StyledText').innerText;
-            const Time = new Date().toLocaleTimeString(); 
+            const Time = new Date().toLocaleTimeString();
 
             const index = transcriptArray.findIndex(t => t.ID === ID);
 
@@ -50,23 +51,35 @@ function checkCaptions() {
     });
 }
 
-let observer = null;
-
+// run startTranscription every 5 seconds
+// cancel the interval if capturing is true
 function startTranscription() {
+    const meetingDurationElement = document.getElementById("call-duration-custom");
+    if (meetingDurationElement) {
+
+    } else {
+        setTimeout(startTranscription, 5000);
+        return false;
+    }
+
     const closedCaptionsContainer = document.querySelector("[data-tid='closed-captions-renderer']")
     if (!closedCaptionsContainer) {
-        alert("Please, click 'More' > 'Language and speech' > 'Turn on life captions'");
-        return;
+        console.log("Please, click 'More' > 'Language and speech' > 'Turn on life captions'");
+        setTimeout(startTranscription, 5000);
+        return false;
     }
+
     capturing = true;
     observer = new MutationObserver(checkCaptions);
     observer.observe(document.body, {
         childList: true,
         subtree: true
     });
-    setInterval(checkCaptions, 3000);
-    console.log("3️⃣", "checking every 3 seconds");
+
+    return true;
 }
+
+startTranscription();
 
 // Listen for messages from the service_worker.js script.
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -78,7 +91,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'return_transcript':
             console.log("response:", transcriptArray);
             if (!capturing) {
-                alert("Oops! You didn't Start Capturing. Start Capturing and try again.");
+                alert("Oops! No captions were captured. Please, try again.");
                 return;
             }
 
@@ -96,4 +109,4 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 });
 
-console.log("3️⃣", "LISTENING in content.js");
+console.log("content_script.js is running");
