@@ -8,22 +8,6 @@ The MS Teams Live Captions Saver is a Chrome extension that allows you to captur
 
 [MS Teams Live Captions Saver. Chrome Web Store](https://chromewebstore.google.com/detail/ms-teams-live-captions-sa/admggdkgfaifbniocphilidmpjbfldjc?pli=1)
 
-## Installing extension via the "Load unpacked"
-The MS Teams Live Captions Saver Extension can also be installed via the "Load unpacked" option in Chrome/Edge/Brave browsers. Here's how:
-
-1. Download the `teams-captions-saver.zip` file and unzip it anywhere on disk.
-
-2. Open Chrome, Edge or Brave browser  and navigate to the Extensions page:
-   - edge://extensions/ -  edge browser
-   - chrome://extensions/ -  google chrome browser
-   - brave://extensions/ -  brave browser
-
-
-3. Enable Developer mode by clicking the toggle switch (typically, at the top right).
-
-4. Click the "Load Unpacked" button and select the directory containing your extension files. Use the unzipped `teams-captions-saver` directory.
-
-
 ## Usage
 
 To use the Chat Transcript Saver extension:
@@ -39,6 +23,7 @@ To use the Chat Transcript Saver extension:
 3. When you're finished, click "Save Captions". The transcript will be downloaded as a YAML file.
 
 ![](IMG/4.png)
+
 
 
 ## Sample data exported
@@ -72,7 +57,24 @@ You can also view the captured captions in the browser. To do this, click on the
 
 ![alt text](IMG/6.png)
 
-## Standalone JavaScript. When you can't use browser extensions
+
+## Optional: Installing extension via the "Load unpacked"
+The MS Teams Live Captions Saver Extension can also be installed via the "Load unpacked" option in Chrome/Edge/Brave browsers. Here's how:
+
+1. Download the `teams-captions-saver.zip` file and unzip it anywhere on disk.
+
+2. Open Chrome, Edge or Brave browser  and navigate to the Extensions page:
+   - edge://extensions/ -  edge browser
+   - chrome://extensions/ -  google chrome browser
+   - brave://extensions/ -  brave browser
+
+
+3. Enable Developer mode by clicking the toggle switch (typically, at the top right).
+
+4. Click the "Load Unpacked" button and select the directory containing your extension files. Use the unzipped `teams-captions-saver` directory.
+
+
+## Optional: Standalone JavaScript. When you can't use browser extensions
 But what if you can't use extensions for security reasons? Well, in this case:
 - Join a meeting using a browser.
 - Start the live captions using the built-in MS Teams feature.
