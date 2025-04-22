@@ -39,10 +39,6 @@ To use the Chat Transcript Saver extension:
 ![](IMG/4.png)
 
 
-## Browsing Captured Captions
-
-![](IMG/6.png)
-
 ## Sample data exported
 
 Data is exported as a Yaml file. Here's a sample of the data exported:
@@ -64,8 +60,16 @@ Name: Denis Molodtsov
 Text: This is a test
 Time: 21:56:08
 ----
-
 ```
+
+## Browsing Captured Captions
+
+You can also view the captured captions in the browser. To do this, click on the extension icon in the toolbar and select "View Captions". This will open a new tab with the captured captions.
+
+![alt text](IMG/7.png)
+
+![alt text](IMG/6.png)
+
 ## Standalone JavaScript. When you can't use browser extensions
 But what if you can't use extensions for security reasons? Well, in this case:
 - Join a meeting using a browser.
