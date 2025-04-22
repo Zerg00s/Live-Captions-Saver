@@ -73,7 +73,23 @@ But what if you can't use extensions for security reasons? Well, in this case:
 
 Please note that this extension works on Microsoft Teams pages only during the meetings and only when the live captions are first turned on.
 
-# Disclaimer
+## Contributing (Developers only)
+
+### Update the manifest.json file
+- Open manifest.json
+- Increment the version number
+
+### Package the extension
+
+![alt text](IMG/package-extension.png)
+
+### Publish new version to the Chrome Web Store
+- Navigate to [Chrome Developer Dashboard.](https://chrome.google.com/webstore/devconsole])
+- Click the Add new item button.
+- Click Choose file > your zip file > Upload. If your item's manifest and ZIP file are valid, you can edit your item on the next page.
+
+
+## Disclaimer
 
 Please note that the MS Teams Live Captions Saver Extension captures and saves live captions from meetings, which might include sensitive information and private conversations. Therefore, before using this tool, you are required to obtain consent from all parties involved in the meeting. 
 
