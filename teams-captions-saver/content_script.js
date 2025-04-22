@@ -45,9 +45,7 @@ function checkCaptions() {
                     ID
                 });
             }
-
         }
-
     });
 }
 
@@ -81,28 +79,45 @@ function startTranscription() {
 
 startTranscription();
 
-// Listen for messages from the service_worker.js script.
+// Listen for messages from the popup.js or service_worker.js
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    switch (request.message) {  // message from service_worker.js      
-        case 'return_transcript': // message from service_worker.js
-            console.log("response:", transcriptArray);
-            if (!capturing) {
-                alert("Oops! No captions were captured. Please, try again.");
+    console.log("Content script received message:", request);
+    
+    switch (request.message) {
+        case 'return_transcript':
+            console.log("return_transcript request received:", transcriptArray);
+            if (!capturing || transcriptArray.length === 0) {
+                alert("Oops! No captions were captured. Please make sure captions are turned on.");
                 return;
             }
 
             let meetingTitle = document.title.replace("__Microsoft_Teams", '').replace(/[^a-z0-9 ]/gi, '');
             chrome.runtime.sendMessage({
                 message: "download_captions",
-                transcriptArray: transcriptArray,
+                transcriptArray: transcriptArray.map(({ID, ...rest}) => rest), // Remove ID property
                 meetingTitle: meetingTitle
             });
+            break;
 
+        case 'get_captions_for_viewing':
+            console.log("get_captions_for_viewing request received:", transcriptArray);
+            if (!capturing || transcriptArray.length === 0) {
+                alert("Oops! No captions were captured. Please make sure captions are turned on.");
+                return;
+            }
+
+            // Remove ID property from each item in the array before sending
+            const viewableTranscripts = transcriptArray.map(({ID, ...rest}) => rest);
+            
+            chrome.runtime.sendMessage({
+                message: "display_captions",
+                transcriptArray: viewableTranscripts
+            });
+            break;
 
         default:
             break;
     }
-
 });
 
 console.log("content_script.js is running");

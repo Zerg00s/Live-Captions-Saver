@@ -24,32 +24,88 @@ function saveTranscripts(meetingTitle, transcriptArray) {
     });
 }
 
+function createViewerTab(transcriptArray) {
+    // Create a data URL containing the HTML content for viewing captions
+    const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>MS Teams Captions Viewer</title>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    line-height: 1.6;
+                    margin: 0;
+                    padding: 20px;
+                    background-color: #f5f5f5;
+                }
+                .container {
+                    max-width: 800px;
+                    margin: 0 auto;
+                    background-color: white;
+                    padding: 20px;
+                    border-radius: 5px;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                }
+                h1 {
+                    color: #333;
+                    text-align: center;
+                }
+                .caption {
+                    border-bottom: 1px solid #eee;
+                    padding: 10px 0;
+                    margin-bottom: 10px;
+                }
+                .name {
+                    font-weight: bold;
+                    color: #0078d4;
+                }
+                .text {
+                    margin: 5px 0;
+                }
+                .time {
+                    color: #666;
+                    font-size: 0.85em;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>MS Teams Captions</h1>
+                <div id="captions-container">
+                    ${transcriptArray.map(item => `
+                        <div class="caption">
+                            <div class="name">${item.Name}</div>
+                            <div class="text">${item.Text}</div>
+                            <div class="time">${item.Time}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </body>
+        </html>
+    `;
+    
+    // Create a new tab with this HTML content
+    chrome.tabs.create({
+        url: 'data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent)
+    });
+}
 
-chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
-    console.log(message);
+chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
+    console.log("Service worker received message:", message);
+    
     switch (message.message) {
         case 'download_captions': // message from Content script
             console.log('download_captions triggered!', message);
             saveTranscripts(message.meetingTitle, message.transcriptArray);
-
             break;
-        case 'save_captions': // message from Popup
-            console.log('save_captions triggered!');
 
-            const [tab] = await chrome.tabs.query({
-                active: true,
-                lastFocusedWindow: true
-            });
-            console.log("Tabs query result:", tab);
-
-            console.log("sending message return_transcript");
-            chrome.tabs.sendMessage(tab.id, {
-                message: "return_transcript"
-            });
-
-            console.log("message start_capture sent!");
-
+        case 'display_captions': // message from Content script with captions for viewing
+            console.log('display_captions triggered!', message);
+            createViewerTab(message.transcriptArray);
             break;
+
         default:
             break;
     }
