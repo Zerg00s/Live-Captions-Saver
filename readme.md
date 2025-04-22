@@ -36,8 +36,12 @@ To use the Chat Transcript Saver extension:
 
 3. When you're finished, click "Save Captions". The transcript will be downloaded as a YAML file.
 
-![](IMG/4.jpg)
+![](IMG/4.png)
 
+
+## Browsing Captured Captions
+
+![](IMG/6.png)
 
 ## Sample data exported
 
@@ -79,15 +83,10 @@ Please note that this extension works on Microsoft Teams pages only during the m
 - Open manifest.json
 - Increment the version number
 
-### Package the extension
-
-![alt text](IMG/package-extension.png)
-
-### Publish new version to the Chrome Web Store
+### Publish New Extension Version to the Chrome Web Store
 - Navigate to [Chrome Developer Dashboard.](https://chrome.google.com/webstore/devconsole])
 - Click the Add new item button.
 - Click Choose file > your zip file > Upload. If your item's manifest and ZIP file are valid, you can edit your item on the next page.
-
 
 ## Disclaimer
 
