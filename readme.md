@@ -6,7 +6,7 @@ The MS Teams Live Captions Saver is a Chrome extension that allows you to captur
 
 ## Install from the Chrome Store
 
-[MS Teams Live Captions Saver. Chrome Web Store](https://chromewebstore.google.com/detail/ms-teams-live-captions-sa/admggdkgfaifbniocphilidmpjbfldjc?pli=1)
+[MS Teams Live Captions Saver. Chrome Web Store](https://chromewebstore.google.com/detail/ms-teams-live-captions-sa/ffjfmokaelmhincapcajcnaoelgmpoih)
 
 ## Usage
 
