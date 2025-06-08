@@ -73,7 +73,6 @@ The MS Teams Live Captions Saver Extension can also be installed via the "Load u
 
 4. Click the "Load Unpacked" button and select the directory containing your extension files. Use the unzipped `teams-captions-saver` directory.
 
-
 ## Optional: Standalone JavaScript. When you can't use browser extensions
 But what if you can't use extensions for security reasons? Well, in this case:
 - Join a meeting using a browser.
@@ -87,11 +86,23 @@ Please note that this extension works on Microsoft Teams pages only during the m
 
 ## Contributing (Developers only)
 
+### Load unpacked extension in Chrome/Edge/Brave browser
+
+- Open the Extensions page:
+   - edge://extensions/ -  edge browser
+   - chrome://extensions/ -  google chrome browser
+   - brave://extensions/ -  brave browser
+- Enable Developer mode by clicking the toggle switch (typically, at the top right).
+- Click the "Load Unpacked" button and select the directory containing your extension files.
+- Open https://teams.microsoft.com/v2/
+
 ### Update the manifest.json file
+
 - Open manifest.json
 - Increment the version number
 
 ### Publish New Extension Version to the Chrome Web Store
+
 - Navigate to [Chrome Developer Dashboard.](https://chrome.google.com/webstore/devconsole])
 - Click the Add new item button.
 - Click Choose file > your zip file > Upload. If your item's manifest and ZIP file are valid, you can edit your item on the next page.
@@ -105,3 +116,4 @@ You must ensure that the use of this extension complies with all applicable laws
 This tool is provided for use "as is" and the developer assumes no responsibility for any legal issues that may arise from its use, including but not limited to privacy violations or data breaches. Users are solely responsible for the use of this tool and ensuring they comply with all local, national, and international laws.
 
 By using this extension, you agree to use it responsibly and ethically, and acknowledge that you have understood and accepted all the potential legal implications.
+
