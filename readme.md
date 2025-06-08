@@ -93,8 +93,9 @@ Please note that this extension works on Microsoft Teams pages only during the m
    - chrome://extensions/ -  google chrome browser
    - brave://extensions/ -  brave browser
 - Enable Developer mode by clicking the toggle switch (typically, at the top right).
-- Click the "Load Unpacked" button and select the directory containing your extension files.
+- Click the "Load Unpacked" button and select the `teams-captions-saver` directory.
 - Open https://teams.microsoft.com/v2/
+- Open calendar and join a meeting.
 
 ### Update the manifest.json file
 
