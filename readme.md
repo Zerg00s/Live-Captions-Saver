@@ -96,6 +96,7 @@ Please note that this extension works on Microsoft Teams pages only during the m
 - Click the "Load Unpacked" button and select the `teams-captions-saver` directory.
 - Open https://teams.microsoft.com/v2/
 - Open calendar and join a meeting.
+- Press ALT+SHIFT+C to turn on live captions
 
 ### Update the manifest.json file
 
