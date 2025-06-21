@@ -16,7 +16,7 @@ To use the Chat Transcript Saver extension:
 
 2. Join a meeting.
 
-3. Turn on live captions. This is done by clicking on the ellipsis button in the meeting controls, then clicking "Turn on live captions".
+3. Turn on live captions by pressing `ALT + SHIFT + C`. This is also done by clicking on the ellipsis button in the meeting controls, then clicking "Turn on live captions".
 
 ![](IMG/1.png)
 
