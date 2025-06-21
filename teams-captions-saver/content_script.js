@@ -100,10 +100,21 @@ function checkRecentCaptions() {
     if (timeSinceLastCaption >= 4500) { // Slightly less than 5000 to account for timer timing
         console.log('Processing recent captions due to silence...');
         
-        // Process the more recent captions (but still skip the very last one to be safe)
+        // Process the more recent captions 
         // Cover the gap between stable processing (last 5) and current processing
         const startIndex = Math.max(0, captionTextElements.length - 5); 
-        const endIndex = captionTextElements.length - 1; // Skip the very last one
+        let endIndex = captionTextElements.length - 1; // Usually skip the very last one
+        
+        // If this is triggered by user export request, try to include the very last caption too
+        // Check if the last caption looks complete (ends with punctuation)
+        if (captionTextElements.length > 0) {
+            const lastElement = captionTextElements[captionTextElements.length - 1];
+            const lastText = lastElement.innerText.trim();
+            if (lastText.match(/[.!?]$/)) {
+                console.log('Last caption ends with punctuation, including it:', lastText);
+                endIndex = captionTextElements.length; // Include the very last one
+            }
+        }
         
         console.log(`Processing captions from index ${startIndex} to ${endIndex - 1}`);
         
