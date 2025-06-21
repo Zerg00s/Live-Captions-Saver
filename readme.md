@@ -105,8 +105,10 @@ Please note that this extension works on Microsoft Teams pages only during the m
 
 ### Publish New Extension Version to the Chrome Web Store
 
+- ZIP the `teams-captions-saver` directory.
 - Navigate to [Chrome Developer Dashboard.](https://chrome.google.com/webstore/devconsole)
-- Click the Add new item button.
+- Click on "MS Teams Live Captions Saver" > Package
+- Upload new package.
 - Click Choose file > your zip file > Upload. If your item's manifest and ZIP file are valid, you can edit your item on the next page.
 
 ## Disclaimer
