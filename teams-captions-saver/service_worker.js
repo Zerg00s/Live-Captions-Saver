@@ -18,7 +18,7 @@ function saveTranscripts(meetingTitle, transcriptArray) {
     console.log(yaml);
 
     chrome.downloads.download({
-        url: 'data:text/plain,' + yaml,
+        url: 'data:text/plain;charset=utf-8,' + encodeURIComponent(yaml),
         filename: meetingTitle + ".txt",
         saveAs: true
     });
