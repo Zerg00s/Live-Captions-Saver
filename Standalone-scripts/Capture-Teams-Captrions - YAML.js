@@ -62,7 +62,7 @@ function checkTranscripts() {
 const observer = new MutationObserver(checkTranscripts);
 
 // Observe the captions container more specifically if it exists
-const captionsContainer = document.querySelector("[data-tid='closed-captions-renderer']");
+const closedCaptionsContainer = document.querySelector("[data-tid='closed-caption-v2-window-wrapper']");
 if (captionsContainer) {
     observer.observe(captionsContainer, {
         childList: true,

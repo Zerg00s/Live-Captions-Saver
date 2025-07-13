@@ -7,7 +7,7 @@
     "128": "icon.png"
   },
   
-  "version": "3.6.2",
+  "version": "3.6.3",
   "description": "This extension allows you to capture and save MS Teams live captions. Developed by Denis Molodtsov.",
   "homepage_url": "https://spdenis.com",  
   "permissions": [

@@ -196,7 +196,7 @@ function startTranscription() {
         return false;
     }
 
-    const closedCaptionsContainer = document.querySelector("[data-tid='closed-captions-renderer']");
+    const closedCaptionsContainer = document.querySelector("[data-tid='closed-caption-v2-window-wrapper']");
     if (!closedCaptionsContainer) {
         console.log("Please, click 'More' > 'Language and speech' > 'Turn on live captions'");
         setTimeout(startTranscription, 5000);
