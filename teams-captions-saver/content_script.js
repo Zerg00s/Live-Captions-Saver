@@ -201,6 +201,8 @@ function startTranscription() {
         console.log("Please, click 'More' > 'Language and speech' > 'Turn on live captions'");
         setTimeout(startTranscription, 5000);
         return false;
+    }else{
+        console.log("Found captions");
     }
 
     console.log("Found captions container, setting up observer...");
