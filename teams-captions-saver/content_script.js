@@ -50,6 +50,13 @@ function checkCaptions() {
         const transcript = textElement.closest('.fui-ChatMessageCompact');
         if (!transcript) continue;
         
+        // Generate a unique ID for the transcript element if it doesn't have one
+        // This handles Teams removing caption IDs
+        if (!transcript.getAttribute('data-caption-id')) {
+            const uniqueId = `caption_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+            transcript.setAttribute('data-caption-id', uniqueId);
+        }
+        
         const authorElement = transcript.querySelector('[data-tid="author"]');
         if (!authorElement) continue;
         
@@ -127,6 +134,13 @@ function checkRecentCaptions() {
             const transcript = textElement.closest('.fui-ChatMessageCompact');
             if (!transcript) continue;
             
+            // Generate a unique ID for the transcript element if it doesn't have one
+            // This handles Teams removing caption IDs
+            if (!transcript.getAttribute('data-caption-id')) {
+                const uniqueId = `caption_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                transcript.setAttribute('data-caption-id', uniqueId);
+            }
+            
             const authorElement = transcript.querySelector('[data-tid="author"]');
             if (!authorElement) continue;
             
@@ -196,7 +210,22 @@ function startTranscription() {
         return false;
     }
 
-    const closedCaptionsContainer = document.querySelector("[data-tid='closed-captions-renderer']");
+    // Use multiple selectors to find captions container (resilient to Teams UI changes)
+    const captionSelectors = [
+        "[data-tid='closed-caption-v2-window-wrapper']",  // Teams v2 wrapper
+        "[data-tid='closed-captions-renderer']",          // Original selector
+        "[data-tid*='closed-caption']"                    // Wildcard fallback
+    ];
+    
+    let closedCaptionsContainer = null;
+    for (const selector of captionSelectors) {
+        closedCaptionsContainer = document.querySelector(selector);
+        if (closedCaptionsContainer) {
+            console.log(`Found captions container using selector: ${selector}`);
+            break;
+        }
+    }
+    
     if (!closedCaptionsContainer) {
         console.log("Please, click 'More' > 'Language and speech' > 'Turn on live captions'");
         setTimeout(startTranscription, 5000);
