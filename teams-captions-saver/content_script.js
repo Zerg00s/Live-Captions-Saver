@@ -344,7 +344,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             // Sort transcripts by the order they appear on screen (not by capture time)
             const orderedForDownload = sortTranscriptsByScreenOrder();
             
-            let meetingTitle = document.title.replace("__Microsoft_Teams", '').replace(/[^a-z0-9 ]/gi, '');
+            let meetingTitle = document.title
+                .replace("__Microsoft_Teams", '')
+                .replace(/[^a-z0-9 ]/gi, ' ')  // Replace special chars with space
+                .replace(/\s+/g, ' ')           // Collapse multiple spaces into one
+                .trim();                        // Remove leading/trailing spaces
             chrome.runtime.sendMessage({
                 message: "download_captions",
                 transcriptArray: orderedForDownload.map(({ID, ...rest}) => rest), // Remove ID property
