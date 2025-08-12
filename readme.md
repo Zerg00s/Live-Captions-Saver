@@ -206,11 +206,18 @@ This extension captures and saves live captions from meetings, which may include
 
 This project is provided "as is" without warranty. Users are responsible for compliance with all applicable laws and regulations. See LICENSE file for details.
 
+
+
 ## Acknowledgments
 
-- Original concept inspired by the need for accessible meeting documentation
-- Built for the Microsoft Teams community
 - Special thanks to all contributors and users providing feedback
+
+### Publish New Extension Version to the Chrome Web Store
+
+- Navigate to [Chrome Developer Dashboard.](https://chrome.google.com/webstore/devconsole)
+- Click the Add new item button.
+
+- Click Choose file > your zip file > Upload. If your item's manifest and ZIP file are valid, you can edit your item on the next page.
 
 ## Support
 
