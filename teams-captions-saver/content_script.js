@@ -1,397 +1,948 @@
+// --- Constants ---
+const TIMING = {
+    BUTTON_CLICK_DELAY: 400,
+    RETRY_DELAY: 2000,
+    MAIN_LOOP_INTERVAL: 5000,
+    OBSERVER_CHECK_INTERVAL: 10000,
+    TOOLTIP_DISPLAY_DURATION: 1500,
+    ATTENDEE_UPDATE_INTERVAL: 60000, // Check attendees every minute
+    INITIAL_ATTENDEE_DELAY: 1500, // Wait 1.5s after meeting start before first check
+};
+
+const SELECTORS = {
+    CAPTIONS_RENDERER: "[data-tid='closed-caption-v2-window-wrapper'], [data-tid='closed-captions-renderer'], [data-tid*='closed-caption']",
+    CHAT_MESSAGE: '.fui-ChatMessageCompact',
+    AUTHOR: '[data-tid="author"]',
+    CAPTION_TEXT: '[data-tid="closed-caption-text"]',
+    LEAVE_BUTTONS: [
+        "button[data-tid='hangup-main-btn']",
+        "button[data-tid='hangup-leave-button']",
+        "button[data-tid='hangup-end-meeting-button']",
+        "div#hangup-button button",
+        "#hangup-button"
+    ].join(','),
+    MORE_BUTTON: "button[data-tid='more-button'], button[id='callingButtons-showMoreBtn']",
+    MORE_BUTTON_EXPANDED: "button[data-tid='more-button'][aria-expanded='true'], button[id='callingButtons-showMoreBtn'][aria-expanded='true']",
+    LANGUAGE_SPEECH_BUTTON: "div[id='LanguageSpeechMenuControl-id']",
+    TURN_ON_CAPTIONS_BUTTON: "div[id='closed-captions-button']",
+    // Attendee tracking selectors
+    ATTENDEE_TREE: "[role='tree'][aria-label='Attendees']",
+    ATTENDEE_ITEM: "[data-tid^='participantsInCall-']",
+    ATTENDEE_COUNT: "#roster-title-section-2",
+    ATTENDEE_NAME: "[id^='roster-avatar-img-']",
+    ATTENDEE_ROLE: "[data-tid='ts-roster-organizer-status']",
+    MEETING_CHAT: "#chat-pane-list",
+    CHAT_CONTROL_MESSAGE: ".fui-ChatControlMessage",
+    PEOPLE_BUTTON: "button[data-tid='calling-toolbar-people-button'], button[id='roster-button']",
+};
+
+// --- State ---
 const transcriptArray = [];
 let capturing = false;
+let meetingTitleOnStart = '';
+let recordingStartTime = null;
 let observer = null;
-let transcriptIdCounter = 0; // Since IDs are not reliable in new structure
-let processedCaptions = new Set(); // Track captions we've already processed
-let lastCaptionTime = 0; // Track when we last saw a caption change (0 = never)
-let silenceCheckTimer = null; // Timer to check for silence periods
-let lastCaptionSnapshot = ''; // Track the actual content to detect real changes
+let observedElement = null;
+let hasInitializedListeners = false;
+let wasInMeeting = false;
+let meetingObserver = null;
+let captionsObserver = null;
+let cachedElements = new Map();
+let autoEnableInProgress = false;
+let autoEnableLastAttempt = 0;
+let autoEnableDebounceTimer = null;
+let autoSaveTriggered = false;
+let lastMeetingId = null;
 
-function checkCaptions() {
-    // Get all caption text elements directly from the document
-    const captionTextElements = document.querySelectorAll('[data-tid="closed-caption-text"]');
-    
-    // Create a snapshot of current caption content to detect real changes
-    if (captionTextElements.length > 0) {
-        const currentSnapshot = Array.from(captionTextElements).map(el => el.innerText.trim()).join('|');
-        
-        // Only update timing if the content actually changed
-        if (currentSnapshot !== lastCaptionSnapshot) {
-            lastCaptionSnapshot = currentSnapshot;
-            lastCaptionTime = Date.now();
-            
-            console.log('Caption content changed, resetting silence timer');
-            
-            // Reset the silence check timer
-            if (silenceCheckTimer) {
-                clearTimeout(silenceCheckTimer);
-            }
-            
-            // Set a timer to check for recent captions after 5 seconds of silence
-            silenceCheckTimer = setTimeout(checkRecentCaptions, 5000);
-        }
+// --- Attendee Tracking State ---
+let attendeeUpdateInterval = null;
+let backupInterval = null;
+let attendeeData = {
+    allAttendees: new Set(), // All unique attendees who joined
+    currentAttendees: new Map(), // Currently in meeting (name -> role)
+    attendeeHistory: [], // Detailed tracking with timestamps
+    lastUpdated: null,
+    meetingStartTime: null,
+};
+
+// --- Real-time Broadcasting ---
+function broadcastCaptionUpdate(data) {
+    try {
+        chrome.runtime.sendMessage({
+            message: "live_caption_update",
+            ...data
+        }).catch(() => {
+            // Viewer might not be open, ignore error
+        });
+    } catch (error) {
+        // Silent fail if no listeners
     }
-    
-    // Be very conservative - skip the last 5 elements to ensure we only get truly stable captions
-    // and only process if we have at least 6 captions total
-    if (captionTextElements.length < 6) {
-        console.log(`Only ${captionTextElements.length} captions, need at least 6 for stable processing`);
-        return; // Not enough captions to safely determine which are stable
+}
+
+function broadcastAttendeeUpdate(data) {
+    try {
+        chrome.runtime.sendMessage({
+            message: "live_attendee_update",
+            ...data
+        }).catch(() => {
+            // Viewer might not be open, ignore error
+        });
+    } catch (error) {
+        // Silent fail if no listeners
     }
-    
-    const numStableElements = captionTextElements.length - 5;
-    
-    for (let i = 0; i < numStableElements; i++) {
-        const textElement = captionTextElements[i];
-        const Text = textElement.innerText.trim();
-        if (Text.length === 0) continue;
-        
-        // Find the parent ChatMessageCompact element to get the author
-        const transcript = textElement.closest('.fui-ChatMessageCompact');
-        if (!transcript) continue;
-        
-        // Generate a unique ID for the transcript element if it doesn't have one
-        // This handles Teams removing caption IDs
-        if (!transcript.getAttribute('data-caption-id')) {
-            const uniqueId = `caption_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-            transcript.setAttribute('data-caption-id', uniqueId);
-        }
-        
-        const authorElement = transcript.querySelector('[data-tid="author"]');
-        if (!authorElement) continue;
-        
-        const Name = authorElement.innerText.trim();
-        
-        // Create a unique key using name and text only
-        const captionKey = `${Name}:${Text}`;
-        
-        // Skip if we've already processed this exact caption
-        if (processedCaptions.has(captionKey)) {
-            continue;
-        }
-        
-        // Mark as processed
-        processedCaptions.add(captionKey);
-        
-        // Add to transcript array
-        const Time = new Date().toLocaleTimeString();
-        const newCaption = {
-            Name,
-            Text,
-            Time,
-            ID: captionKey
+}
+
+// --- Error Handling & Logging ---
+class ErrorHandler {
+    static log(error, context = '', silent = false) {
+        const timestamp = new Date().toISOString();
+        const errorInfo = {
+            timestamp,
+            context,
+            message: error.message || String(error),
+            stack: error.stack,
+            url: window.location.href
         };
         
-        transcriptArray.push(newCaption);
-        console.log('FINAL STABLE CAPTION:', newCaption);
+        console.error(`[Teams Caption Saver] ${context}:`, errorInfo);
+        
+        if (!silent) {
+            // Could send to analytics or show user notification
+            chrome.runtime.sendMessage({
+                message: "error_logged",
+                error: errorInfo
+            }).catch(() => {}); // Prevent recursive errors
+        }
+        
+        return errorInfo;
+    }
+    
+    static wrap(fn, context = '', fallback = null) {
+        return async function(...args) {
+            try {
+                return await fn.apply(this, args);
+            } catch (error) {
+                ErrorHandler.log(error, context);
+                return fallback;
+            }
+        };
     }
 }
 
-function checkRecentCaptions() {
-    console.log('checkRecentCaptions called - checking for silence-based captions');
-    
-    // After 5 seconds of silence, check if there are recent captions we can safely capture
-    const captionTextElements = document.querySelectorAll('[data-tid="closed-caption-text"]');
-    
-    if (captionTextElements.length === 0) {
-        console.log('No caption elements found for silence check');
-        return;
-    }
-    
-    console.log(`Found ${captionTextElements.length} caption elements for silence check`);
-    
-    // If it's been 5+ seconds since last activity, consider the last 2-3 captions as stable
-    const timeSinceLastCaption = Date.now() - lastCaptionTime;
-    console.log(`Time since last caption: ${timeSinceLastCaption}ms`);
-    
-    if (timeSinceLastCaption >= 4500) { // Slightly less than 5000 to account for timer timing
-        console.log('Processing recent captions due to silence...');
+// --- Retry Mechanism ---
+class RetryHandler {
+    static async withRetry(fn, context = '', maxAttempts = 3, baseDelay = 1000) {
+        let lastError;
         
-        // Process the more recent captions 
-        // Cover the gap between stable processing (last 5) and current processing
-        const startIndex = Math.max(0, captionTextElements.length - 5); 
-        let endIndex = captionTextElements.length - 1; // Usually skip the very last one
-        
-        // If this is triggered by user export request, try to include the very last caption too
-        // Check if the last caption looks complete (ends with punctuation)
-        if (captionTextElements.length > 0) {
-            const lastElement = captionTextElements[captionTextElements.length - 1];
-            const lastText = lastElement.innerText.trim();
-            if (lastText.match(/[.!?]$/)) {
-                console.log('Last caption ends with punctuation, including it:', lastText);
-                endIndex = captionTextElements.length; // Include the very last one
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return await fn();
+            } catch (error) {
+                lastError = error;
+                
+                if (attempt === maxAttempts) {
+                    ErrorHandler.log(error, `${context} - Final attempt failed`, false);
+                    throw error;
+                }
+                
+                const delayTime = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
+                console.log(`[Teams Caption Saver] ${context} - Attempt ${attempt} failed, retrying in ${delayTime}ms:`, error.message || error);
+                await delay(delayTime);
             }
         }
         
-        console.log(`Processing captions from index ${startIndex} to ${endIndex - 1}`);
-        
-        for (let i = startIndex; i < endIndex; i++) {
-            const textElement = captionTextElements[i];
-            const Text = textElement.innerText.trim();
-            if (Text.length === 0) continue;
-            
-            // Find the parent ChatMessageCompact element to get the author
-            const transcript = textElement.closest('.fui-ChatMessageCompact');
-            if (!transcript) continue;
-            
-            // Generate a unique ID for the transcript element if it doesn't have one
-            // This handles Teams removing caption IDs
-            if (!transcript.getAttribute('data-caption-id')) {
-                const uniqueId = `caption_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-                transcript.setAttribute('data-caption-id', uniqueId);
-            }
-            
-            const authorElement = transcript.querySelector('[data-tid="author"]');
-            if (!authorElement) continue;
-            
-            const Name = authorElement.innerText.trim();
-            
-            // Create a unique key using name and text only
-            const captionKey = `${Name}:${Text}`;
-            
-            // Skip if we've already processed this exact caption
-            if (processedCaptions.has(captionKey)) {
-                console.log(`Skipping duplicate silence caption: ${Text}`);
-                continue;
-            }
-            
-            // Mark as processed
-            processedCaptions.add(captionKey);
-            
-            // Add to transcript array
-            const Time = new Date().toLocaleTimeString();
-            const newCaption = {
-                Name,
-                Text,
-                Time,
-                ID: captionKey
-            };
-            
-            transcriptArray.push(newCaption);
-            console.log('SILENCE-DETECTED STABLE CAPTION:', newCaption);
-        }
-    } else {
-        console.log('Not enough silence time elapsed');
+        throw lastError;
     }
 }
 
-// Add a periodic check for silence in case MutationObserver stops firing
-setInterval(() => {
-    if (lastCaptionTime === 0) {
-        // No captions have been processed yet, skip silence check
-        return;
-    }
-    
-    const timeSinceLastCaption = Date.now() - lastCaptionTime;
-    if (timeSinceLastCaption >= 5000 && timeSinceLastCaption <= 6000) {
-        console.log('Periodic silence check triggered');
-        checkRecentCaptions();
-    }
-}, 1000);
+// --- Utility Functions ---
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// run startTranscription every 5 seconds
-// cancel the interval if capturing is true
-function startTranscription() {
-    // Check if we're in a meeting - look for various indicators
-    const meetingIndicators = [
-        document.getElementById("call-duration-custom"),
-        document.querySelector("[data-tid='call-status-container-test-id']"),
-        document.querySelector("#call-status"),
-        // New: check for the "Waiting for others to join..." text
-        Array.from(document.querySelectorAll('span')).find(el => 
-            el.textContent && el.textContent.includes("Waiting for others to join")
-        )
-    ];
-    
-    const inMeeting = meetingIndicators.some(indicator => indicator !== null && indicator !== undefined);
-    
-    if (!inMeeting) {
-        setTimeout(startTranscription, 5000);
-        return false;
-    }
+const getCleanTranscript = () => transcriptArray.map(({ key, ...rest }) => rest);
 
-    // Use multiple selectors to find captions container (resilient to Teams UI changes)
-    const captionSelectors = [
-        "[data-tid='closed-caption-v2-window-wrapper']",  // Teams v2 wrapper
-        "[data-tid='closed-captions-renderer']",          // Original selector
-        "[data-tid*='closed-caption']"                    // Wildcard fallback
-    ];
+// --- DOM Element Caching ---
+function getCachedElement(selector, expiry = 5000) {
+    const now = Date.now();
+    const cached = cachedElements.get(selector);
     
-    let closedCaptionsContainer = null;
-    for (const selector of captionSelectors) {
-        closedCaptionsContainer = document.querySelector(selector);
-        if (closedCaptionsContainer) {
-            console.log(`Found captions container using selector: ${selector}`);
-            break;
-        }
+    if (cached && (now - cached.timestamp) < expiry && document.contains(cached.element)) {
+        return cached.element;
     }
     
-    if (!closedCaptionsContainer) {
-        console.log("Please, click 'More' > 'Language and speech' > 'Turn on live captions'");
-        setTimeout(startTranscription, 5000);
-        return false;
-    }else{
-        console.log("Found captions");
+    const element = document.querySelector(selector);
+    if (element) {
+        cachedElements.set(selector, { element, timestamp: now });
     }
-
-    console.log("Found captions container, setting up observer...");
-    capturing = true;
-    observer = new MutationObserver((mutations) => {
-        console.log('MutationObserver fired with', mutations.length, 'mutations');
-        checkCaptions();
-    });
-    observer.observe(closedCaptionsContainer, {
-        childList: true,
-        subtree: true,
-        characterData: true // Also watch for text changes
-    });
-    
-    console.log("Observer set up, doing initial check...");
-    // Do an initial check
-    checkCaptions();
-    
-    // Also set up a fallback timer to check periodically
-    setInterval(() => {
-        console.log("Fallback timer check...");
-        checkCaptions();
-    }, 2000);
-    
-
-    return true;
+    return element;
 }
 
-function sortTranscriptsByScreenOrder() {
-    // Get the current order of captions as they appear on screen
-    const captionTextElements = document.querySelectorAll('[data-tid="closed-caption-text"]');
-    const screenOrder = [];
-    
-    captionTextElements.forEach((element, index) => {
-        const text = element.innerText.trim();
-        const transcript = element.closest('.fui-ChatMessageCompact');
-        if (transcript) {
-            const authorElement = transcript.querySelector('[data-tid="author"]');
-            if (authorElement) {
-                const name = authorElement.innerText.trim();
-                screenOrder.push({
-                    text: text,
-                    name: name,
-                    screenPosition: index
+function clearElementCache() {
+    cachedElements.clear();
+}
+
+const isUserInMeeting = () => getCachedElement(SELECTORS.LEAVE_BUTTONS) !== null;
+
+// --- Core Logic ---
+const processCaptionUpdates = ErrorHandler.wrap(function() {
+    const closedCaptionsContainer = getCachedElement(SELECTORS.CAPTIONS_RENDERER);
+    if (!closedCaptionsContainer) return;
+
+    const transcriptElements = closedCaptionsContainer.querySelectorAll(SELECTORS.CHAT_MESSAGE);
+
+    transcriptElements.forEach(element => {
+        try {
+            const authorElement = element.querySelector(SELECTORS.AUTHOR);
+            const textElement = element.querySelector(SELECTORS.CAPTION_TEXT);
+
+            if (!authorElement || !textElement) return;
+
+            const name = authorElement.innerText.trim();
+            const text = textElement.innerText.trim();
+            if (text.length === 0) return;
+
+            let captionId = element.getAttribute('data-caption-id');
+            if (!captionId) {
+                captionId = `caption_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                element.setAttribute('data-caption-id', captionId);
+            }
+
+            const existingIndex = transcriptArray.findIndex(entry => entry.key === captionId);
+            const time = new Date().toLocaleTimeString();
+
+            if (existingIndex !== -1) {
+                // Update existing entry if text has changed
+                if (transcriptArray[existingIndex].Text !== text) {
+                    transcriptArray[existingIndex].Text = text;
+                    transcriptArray[existingIndex].Time = time;
+                    // Broadcast update to viewer
+                    broadcastCaptionUpdate({
+                        type: 'update',
+                        caption: transcriptArray[existingIndex]
+                    });
+                }
+            } else {
+                // Add new entry
+                const newCaption = { Name: name, Text: text, Time: time, key: captionId };
+                transcriptArray.push(newCaption);
+                // Broadcast new caption to viewer
+                broadcastCaptionUpdate({
+                    type: 'new',
+                    caption: newCaption
                 });
             }
+        } catch (error) {
+            ErrorHandler.log(error, 'Processing individual caption element', true);
+        }
+    });
+}, 'Caption updates processing');
+
+// --- Attendee Tracking Functions ---
+function updateAttendeesFromTranscript() {
+    // Fallback method: Extract unique speakers from transcript
+    const speakers = [...new Set(transcriptArray.map(item => item.Name))];
+    const currentTime = new Date().toLocaleTimeString();
+    
+    speakers.forEach(name => {
+        if (!attendeeData.allAttendees.has(name)) {
+            attendeeData.allAttendees.add(name);
+            attendeeData.currentAttendees.set(name, 'Speaker');
+            
+            attendeeData.attendeeHistory.push({
+                name,
+                role: 'Speaker',
+                action: 'detected from transcript',
+                time: currentTime
+            });
+            
+            console.log(`Speaker detected from transcript: ${name}`);
         }
     });
     
-    // Create a map for quick lookup of screen positions
-    const positionMap = new Map();
-    screenOrder.forEach(item => {
-        const key = `${item.name}:${item.text}`;
-        positionMap.set(key, item.screenPosition);
-    });
-    
-    // Sort transcriptArray based on screen order
-    const orderedTranscripts = [...transcriptArray].sort((a, b) => {
-        const keyA = `${a.Name}:${a.Text}`;
-        const keyB = `${b.Name}:${b.Text}`;
-        
-        const posA = positionMap.get(keyA);
-        const posB = positionMap.get(keyB);
-        
-        // If both have screen positions, sort by screen order
-        if (posA !== undefined && posB !== undefined) {
-            return posA - posB;
+    attendeeData.lastUpdated = currentTime;
+    console.log(`Attendee update from transcript. Speakers found: ${speakers.length}`);
+}
+function updateAttendeeList() {
+    try {
+        const attendeeTree = document.querySelector(SELECTORS.ATTENDEE_TREE);
+        if (!attendeeTree) {
+            console.log("Attendee tree not found, roster might not be open");
+            // Fallback: Add speakers from transcript as attendees
+            updateAttendeesFromTranscript();
+            return;
         }
         
-        // If only one has a screen position, put it first
-        if (posA !== undefined) return -1;
-        if (posB !== undefined) return 1;
+        const attendeeItems = document.querySelectorAll(SELECTORS.ATTENDEE_ITEM);
+        const currentTime = new Date().toLocaleTimeString();
         
-        // If neither has a screen position, maintain original order
-        return 0;
-    });
-    
-    console.log("Sorted transcripts by screen order:", orderedTranscripts);
-    return orderedTranscripts;
+        // Clear current attendees for fresh update
+        const previousAttendees = new Set(attendeeData.currentAttendees.keys());
+        attendeeData.currentAttendees.clear();
+        
+        // Process each attendee
+        attendeeItems.forEach(item => {
+            const nameElement = item.querySelector(SELECTORS.ATTENDEE_NAME);
+            const roleElement = item.querySelector(SELECTORS.ATTENDEE_ROLE);
+            
+            if (nameElement) {
+                const name = nameElement.textContent.trim();
+                const role = roleElement ? roleElement.textContent.trim() : 'Attendee';
+                
+                // Add to current attendees
+                attendeeData.currentAttendees.set(name, role);
+                
+                // Track in all attendees
+                if (!attendeeData.allAttendees.has(name)) {
+                    attendeeData.allAttendees.add(name);
+                    
+                    // Add to history as new join
+                    attendeeData.attendeeHistory.push({
+                        name,
+                        role,
+                        action: 'joined',
+                        time: currentTime
+                    });
+                    
+                    console.log(`New attendee detected: ${name} (${role})`);
+                }
+            }
+        });
+        
+        // Check for attendees who left
+        previousAttendees.forEach(name => {
+            if (!attendeeData.currentAttendees.has(name)) {
+                attendeeData.attendeeHistory.push({
+                    name,
+                    action: 'left',
+                    time: currentTime
+                });
+                console.log(`Attendee left: ${name}`);
+            }
+        });
+        
+        attendeeData.lastUpdated = currentTime;
+        
+        // Get count from header
+        const countElement = document.querySelector(SELECTORS.ATTENDEE_COUNT);
+        if (countElement) {
+            const countMatch = countElement.textContent.match(/\((\d+)\)/);
+            if (countMatch) {
+                console.log(`Total attendees in meeting: ${countMatch[1]}`);
+            }
+        }
+        
+        console.log(`Attendee update complete. Current: ${attendeeData.currentAttendees.size}, Total: ${attendeeData.allAttendees.size}`);
+        
+    } catch (error) {
+        ErrorHandler.log(error, 'Updating attendee list', true);
+    }
 }
 
-console.log("Starting transcription...");
-const startResult = startTranscription();
-console.log("startTranscription returned:", startResult);
+async function tryOpenParticipantPanel() {
+    try {
+        const peopleButton = document.querySelector(SELECTORS.PEOPLE_BUTTON);
+        if (peopleButton && peopleButton.getAttribute('aria-pressed') !== 'true') {
+            console.log("Attempting to open participant panel for attendee tracking...");
+            peopleButton.click();
+            await delay(500); // Wait for panel to open
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.log("Could not open participant panel:", error);
+        return false;
+    }
+}
 
-// Manual silence check for testing - runs regardless of startTranscription result
-setTimeout(() => {
-    console.log("MANUAL SILENCE CHECK - forcing checkRecentCaptions()");
-    lastCaptionTime = Date.now() - 6000; // Pretend last caption was 6 seconds ago
-    checkRecentCaptions();
-}, 10000); // Run this once after 10 seconds
-
-// Listen for messages from the popup.js or service_worker.js
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log("Content script received message:", request);
+async function startAttendeeTracking() {
+    // Check if attendee tracking is enabled
+    const { trackAttendees, autoOpenAttendees } = await chrome.storage.sync.get(['trackAttendees', 'autoOpenAttendees']);
+    if (trackAttendees === false) {
+        console.log("Attendee tracking is disabled in settings");
+        return;
+    }
     
-    switch (request.message) {
-        case 'return_transcript':
-            console.log("return_transcript request received:", transcriptArray);
-            
-            // Before sending, try to capture any recent captions that might not have been processed yet
-            console.log("Attempting to capture recent captions before download...");
-            lastCaptionTime = Date.now() - 6000; // Force silence detection
-            checkRecentCaptions();
-            
-            if (!capturing || transcriptArray.length === 0) {
-                alert("Oops! No captions were captured. Please make sure captions are turned on.");
-                sendResponse({success: false});
-                return;
-            }
+    if (attendeeUpdateInterval) {
+        clearInterval(attendeeUpdateInterval);
+    }
+    
+    // Reset attendee data for new meeting
+    attendeeData = {
+        allAttendees: new Set(),
+        currentAttendees: new Map(),
+        attendeeHistory: [],
+        lastUpdated: null,
+        meetingStartTime: new Date().toISOString(),
+    };
+    
+    console.log("Starting attendee tracking...");
+    
+    // Initial update after delay
+    setTimeout(async () => {
+        // Only auto-open participant panel if setting is enabled
+        if (autoOpenAttendees) {
+            await tryOpenParticipantPanel();
+        }
+        
+        updateAttendeeList();
+        
+        // Then update every minute
+        attendeeUpdateInterval = setInterval(updateAttendeeList, TIMING.ATTENDEE_UPDATE_INTERVAL);
+    }, TIMING.INITIAL_ATTENDEE_DELAY);
+}
 
-            // Sort transcripts by the order they appear on screen (not by capture time)
-            const orderedForDownload = sortTranscriptsByScreenOrder();
-            
-            let meetingTitle = document.title
-                .replace("__Microsoft_Teams", '')
-                .replace(/[^a-z0-9 ]/gi, ' ')  // Replace special chars with space
-                .replace(/\s+/g, ' ')           // Collapse multiple spaces into one
-                .trim();                        // Remove leading/trailing spaces
+function stopAttendeeTracking() {
+    if (attendeeUpdateInterval) {
+        clearInterval(attendeeUpdateInterval);
+        attendeeUpdateInterval = null;
+        console.log("Stopped attendee tracking");
+    }
+}
+
+async function getAttendeeReport() {
+    // Check if attendee tracking is enabled
+    const { trackAttendees } = await chrome.storage.sync.get('trackAttendees');
+    if (trackAttendees === false) {
+        return null; // Return null if tracking is disabled
+    }
+    
+    const report = {
+        meetingStartTime: attendeeData.meetingStartTime,
+        lastUpdated: attendeeData.lastUpdated,
+        totalUniqueAttendees: attendeeData.allAttendees.size,
+        currentAttendeeCount: attendeeData.currentAttendees.size,
+        attendeeList: Array.from(attendeeData.allAttendees),
+        currentAttendees: Array.from(attendeeData.currentAttendees.entries()).map(([name, role]) => ({
+            name,
+            role
+        })),
+        attendeeHistory: attendeeData.attendeeHistory
+    };
+    
+    console.log("[Teams Caption Saver] Attendee report generated:", {
+        totalAttendees: report.totalUniqueAttendees,
+        attendees: report.attendeeList
+    });
+    
+    return report;
+}
+
+// --- Event-Driven Meeting Detection ---
+let meetingStateDebounceTimer = null;
+let captionsStateDebounceTimer = null;
+
+function setupMeetingObserver() {
+    if (meetingObserver) return;
+    
+    meetingObserver = new MutationObserver(() => {
+        // Debounce meeting state changes to prevent excessive calls
+        if (meetingStateDebounceTimer) {
+            clearTimeout(meetingStateDebounceTimer);
+        }
+        meetingStateDebounceTimer = setTimeout(() => {
+            handleMeetingStateChange();
+        }, 1000);
+    });
+    
+    meetingObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributeFilter: ['data-tid']
+    });
+}
+
+function setupCaptionsObserver() {
+    if (captionsObserver) return;
+    
+    captionsObserver = new MutationObserver(() => {
+        // Debounce captions state changes to prevent excessive calls
+        if (captionsStateDebounceTimer) {
+            clearTimeout(captionsStateDebounceTimer);
+        }
+        captionsStateDebounceTimer = setTimeout(() => {
+            handleCaptionsStateChange();
+        }, 1500);
+    });
+    
+    captionsObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributeFilter: ['data-tid']
+    });
+}
+
+const handleMeetingStateChange = ErrorHandler.wrap(async function() {
+    const nowInMeeting = isUserInMeeting();
+    
+    if (wasInMeeting && !nowInMeeting) {
+        console.log("Meeting transition detected: In -> Out. Checking for auto-save.");
+        
+        // Send meeting ended signal to viewer
+        try {
             chrome.runtime.sendMessage({
-                message: "download_captions",
-                transcriptArray: orderedForDownload.map(({ID, ...rest}) => rest), // Remove ID property
-                meetingTitle: meetingTitle
+                message: "meeting_ended"
+            }).catch(() => {
+                // Viewer might not be open, ignore error
             });
-            sendResponse({success: true});
+        } catch (error) {
+            // Silent fail if no listeners
+        }
+        
+        // Generate a unique meeting session ID
+        const currentMeetingId = `${meetingTitleOnStart}_${recordingStartTime?.toISOString() || Date.now()}`;
+        
+        // Prevent duplicate auto-saves for the same meeting session
+        if (autoSaveTriggered && lastMeetingId === currentMeetingId) {
+            console.log("Auto-save already triggered for this meeting session, skipping...");
+            clearElementCache();
+            wasInMeeting = nowInMeeting;
+            return;
+        }
+        
+        try {
+            const { autoSaveOnEnd } = await chrome.storage.sync.get('autoSaveOnEnd');
+            if (autoSaveOnEnd && transcriptArray.length > 0) {
+                console.log("Auto-save is ON and transcript has data. Triggering save.");
+                
+                // Mark auto-save as triggered before sending message
+                autoSaveTriggered = true;
+                lastMeetingId = currentMeetingId;
+                
+                // Send save message without retry (let service worker handle retries if needed)
+                const attendeeReport = await getAttendeeReport();
+                await chrome.runtime.sendMessage({
+                    message: "save_on_leave",
+                    transcriptArray: getCleanTranscript(),
+                    meetingTitle: meetingTitleOnStart,
+                    recordingStartTime: recordingStartTime ? recordingStartTime.toISOString() : new Date().toISOString(),
+                    attendeeReport: attendeeReport
+                });
+                
+                console.log("Auto-save message sent successfully.");
+            }
+        } catch (error) {
+            ErrorHandler.log(error, 'Auto-save on meeting end', false);
+            // Reset auto-save state on error so it can be retried
+            autoSaveTriggered = false;
+        }
+        
+        clearElementCache();
+    }
+    
+    wasInMeeting = nowInMeeting;
+    
+    if (!nowInMeeting) {
+        stopCaptureSession();
+        stopAttendeeTracking();
+        return;
+    } else if (!wasInMeeting && nowInMeeting) {
+        // Reset auto-save state when joining a new meeting
+        console.log("Meeting transition detected: Out -> In. Resetting auto-save state.");
+        autoSaveTriggered = false;
+        lastMeetingId = null;
+        // Start attendee tracking when entering meeting
+        startAttendeeTracking();
+    }
+    
+    handleCaptionsStateChange();
+}, 'Meeting state change handler');
+
+const handleCaptionsStateChange = ErrorHandler.wrap(async function() {
+    if (!isUserInMeeting()) return;
+    
+    const { trackCaptions } = await chrome.storage.sync.get('trackCaptions');
+    if (trackCaptions === false) {
+        console.log("Caption tracking disabled, skipping caption state handling");
+        return;
+    }
+    
+    const captionsContainer = getCachedElement(SELECTORS.CAPTIONS_RENDERER);
+    if (captionsContainer) {
+        startCaptureSession();
+    } else {
+        stopCaptureSession();
+        
+        const { autoEnableCaptions } = await chrome.storage.sync.get('autoEnableCaptions');
+        if (autoEnableCaptions) {
+            // Use debounced version to prevent rapid firing
+            debouncedAutoEnableCaptions();
+        }
+    }
+}, 'Captions state change handler');
+
+function ensureObserverIsActive() {
+    if (!capturing) return;
+
+    const captionContainer = getCachedElement(SELECTORS.CAPTIONS_RENDERER);
+    
+    // If the container doesn't exist or has changed, re-initialize the observer
+    if (!captionContainer || captionContainer !== observedElement) {
+        if (observer) {
+            observer.disconnect();
+        }
+
+        if (captionContainer) {
+            observer = new MutationObserver(processCaptionUpdates);
+            observer.observe(captionContainer, {
+                childList: true,
+                subtree: true,
+                characterData: true,
+            });
+            observedElement = captionContainer;
+            processCaptionUpdates(); // Initial scan
+        } else {
+            observedElement = null;
+        }
+    }
+}
+
+async function startCaptureSession() {
+    // Check if caption tracking is enabled
+    const { trackCaptions } = await chrome.storage.sync.get('trackCaptions');
+    if (trackCaptions === false) {
+        console.log("Caption tracking is disabled in settings");
+        // Still start attendee tracking if captions are disabled
+        startAttendeeTracking();
+        return;
+    }
+    
+    if (capturing) return;
+
+    console.log("New caption session detected. Starting capture.");
+    transcriptArray.length = 0;
+    chrome.storage.session.remove('speakerAliases');
+
+    capturing = true;
+    meetingTitleOnStart = document.title;
+    recordingStartTime = new Date();
+    
+    console.log(`Capture started. Title: "${meetingTitleOnStart}", Time: ${recordingStartTime.toLocaleString()}`);
+    
+    // Start periodic backup
+    startPeriodicBackup();
+    
+    // Start attendee tracking
+    startAttendeeTracking();
+    
+    chrome.runtime.sendMessage({ message: "update_badge_status", capturing: true });
+    
+    ensureObserverIsActive();
+}
+
+function startPeriodicBackup() {
+    // Clear any existing backup interval
+    if (backupInterval) {
+        clearInterval(backupInterval);
+    }
+    
+    // Backup transcript every 30 seconds
+    backupInterval = setInterval(async () => {
+        if (transcriptArray.length > 0) {
+            try {
+                await chrome.storage.local.set({
+                    transcriptBackup: {
+                        transcript: transcriptArray,
+                        meetingTitle: meetingTitleOnStart,
+                        recordingStartTime: recordingStartTime ? recordingStartTime.toISOString() : null,
+                        lastBackup: new Date().toISOString(),
+                        attendeeData: attendeeData
+                    }
+                });
+                console.log(`[Teams Caption Saver] Backup saved: ${transcriptArray.length} entries`);
+            } catch (error) {
+                console.error("[Teams Caption Saver] Backup failed:", error);
+            }
+        }
+    }, 30000); // 30 seconds
+}
+
+function stopCaptureSession() {
+    if (!capturing) return;
+
+    console.log("Captions turned off or meeting ended. Capture stopped. Data preserved.");
+    capturing = false;
+    if (observer) {
+        observer.disconnect();
+        observer = null;
+    }
+    observedElement = null;
+    
+    // Stop periodic backup
+    if (backupInterval) {
+        clearInterval(backupInterval);
+        backupInterval = null;
+    }
+    
+    // Final backup before stopping
+    if (transcriptArray.length > 0) {
+        chrome.storage.local.set({
+            transcriptBackup: {
+                transcript: transcriptArray,
+                meetingTitle: meetingTitleOnStart,
+                recordingStartTime: recordingStartTime ? recordingStartTime.toISOString() : null,
+                lastBackup: new Date().toISOString(),
+                attendeeData: attendeeData
+            }
+        });
+        
+        // Save to session history when meeting ends (even if < 5 minutes)
+        saveToSessionHistory();
+    }
+    
+    // Stop attendee tracking
+    stopAttendeeTracking();
+    
+    chrome.runtime.sendMessage({ message: "update_badge_status", capturing: false });
+}
+
+// Save current transcript to session history
+async function saveToSessionHistory() {
+    if (transcriptArray.length === 0) return;
+    
+    try {
+        // Use message passing to save session (content scripts can't import modules)
+        const attendeeReport = await getAttendeeReport();
+        await chrome.runtime.sendMessage({
+            message: "save_session_history",
+            transcriptArray: transcriptArray,
+            meetingTitle: meetingTitleOnStart || 'Untitled Meeting',
+            attendeeReport: attendeeReport
+        });
+        
+        console.log('[Teams Caption Saver] Session saved to history');
+    } catch (error) {
+        console.log('[Teams Caption Saver] Could not save to session history:', error);
+    }
+}
+
+// --- Automated Features ---
+async function attemptAutoEnableCaptions() {
+    // Prevent multiple simultaneous auto-enable attempts
+    if (autoEnableInProgress) {
+        console.log("Auto-enable already in progress, skipping...");
+        return;
+    }
+    
+    // Prevent too frequent attempts (min 10 seconds between attempts)
+    const now = Date.now();
+    if (now - autoEnableLastAttempt < 10000) {
+        console.log("Auto-enable attempted too recently, skipping...");
+        return;
+    }
+    
+    autoEnableInProgress = true;
+    autoEnableLastAttempt = now;
+    
+    try {
+        console.log("Starting auto-enable captions attempt...");
+        
+        const moreButton = getCachedElement(SELECTORS.MORE_BUTTON);
+        if (!moreButton) {
+            console.error("Auto-enable FAILED: Could not find 'More' button.");
+            return;
+        }
+        
+        // Check if More menu is already expanded
+        const expandedMoreButton = getCachedElement(SELECTORS.MORE_BUTTON_EXPANDED);
+        if (!expandedMoreButton) {
+            console.log("Clicking More button...");
+            moreButton.click();
+            await delay(TIMING.BUTTON_CLICK_DELAY);
+        } else {
+            console.log("More menu already expanded, proceeding...");
+        }
+
+        const langAndSpeechButton = getCachedElement(SELECTORS.LANGUAGE_SPEECH_BUTTON);
+        if (!langAndSpeechButton) {
+            console.error("Auto-enable FAILED: Could not find 'Language and speech' menu item.");
+            // Close the More menu if we opened it
+            const currentExpandedButton = getCachedElement(SELECTORS.MORE_BUTTON_EXPANDED);
+            if (currentExpandedButton) {
+                currentExpandedButton.click();
+            }
+            return;
+        }
+        
+        console.log("Clicking Language and speech...");
+        langAndSpeechButton.click();
+        await delay(TIMING.BUTTON_CLICK_DELAY);
+
+        const turnOnCaptionsButton = getCachedElement(SELECTORS.TURN_ON_CAPTIONS_BUTTON);
+        if (turnOnCaptionsButton) {
+            console.log("Clicking Turn on live captions...");
+            turnOnCaptionsButton.click();
+            await delay(TIMING.BUTTON_CLICK_DELAY);
+        } else {
+            console.error("Auto-enable FAILED: Could not find 'Turn on live captions' button.");
+        }
+
+        // Attempt to close the 'More' menu
+        const finalExpandedButton = getCachedElement(SELECTORS.MORE_BUTTON_EXPANDED);
+        if (finalExpandedButton) {
+            console.log("Closing More menu...");
+            finalExpandedButton.click();
+        }
+        
+        console.log("Auto-enable captions attempt completed.");
+    } catch (e) {
+        console.error("Error during auto-enable captions attempt:", e);
+    } finally {
+        autoEnableInProgress = false;
+    }
+}
+
+function debouncedAutoEnableCaptions() {
+    if (autoEnableDebounceTimer) {
+        clearTimeout(autoEnableDebounceTimer);
+    }
+    
+    autoEnableDebounceTimer = setTimeout(() => {
+        attemptAutoEnableCaptions();
+    }, 2000); // 2 second debounce to prevent rapid firing
+}
+
+// --- Event-Driven Initialization ---
+function initializeEventDrivenSystem() {
+    if (hasInitializedListeners) return;
+    
+    console.log("Initializing event-driven caption system...");
+    
+    // Set up observers for meeting state changes
+    setupMeetingObserver();
+    setupCaptionsObserver();
+    
+    // Periodically check observer status (much less frequent than before)
+    setInterval(ensureObserverIsActive, TIMING.OBSERVER_CHECK_INTERVAL);
+    
+    // Initial state check
+    handleMeetingStateChange();
+    
+    hasInitializedListeners = true;
+}
+
+// --- Memory Leak Prevention ---
+function cleanupObservers() {
+    if (observer) {
+        observer.disconnect();
+        observer = null;
+    }
+    if (meetingObserver) {
+        meetingObserver.disconnect();
+        meetingObserver = null;
+    }
+    if (captionsObserver) {
+        captionsObserver.disconnect();
+        captionsObserver = null;
+    }
+    
+    // Clear all debounce timers
+    if (meetingStateDebounceTimer) {
+        clearTimeout(meetingStateDebounceTimer);
+        meetingStateDebounceTimer = null;
+    }
+    if (captionsStateDebounceTimer) {
+        clearTimeout(captionsStateDebounceTimer);
+        captionsStateDebounceTimer = null;
+    }
+    if (autoEnableDebounceTimer) {
+        clearTimeout(autoEnableDebounceTimer);
+        autoEnableDebounceTimer = null;
+    }
+    
+    // Reset auto-enable state
+    autoEnableInProgress = false;
+    
+    // Stop attendee tracking
+    stopAttendeeTracking();
+    
+    clearElementCache();
+}
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', cleanupObservers);
+
+// Initialize the system
+initializeEventDrivenSystem();
+
+// --- Message Handling ---
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+    switch (request.message) {
+        case 'viewer_ready':
+            // Viewer is ready to receive live updates
+            sendResponse({
+                streaming: capturing,
+                captionCount: transcriptArray.length
+            });
+            return true;
+            
+        case 'get_status':
+            (async () => {
+                const { trackCaptions } = await chrome.storage.sync.get('trackCaptions');
+                const attendeeReport = await getAttendeeReport();
+                sendResponse({
+                    capturing: trackCaptions !== false ? capturing : false,
+                    captionCount: transcriptArray.length,
+                    isInMeeting: isUserInMeeting(),
+                    attendeeCount: attendeeReport ? attendeeReport.totalUniqueAttendees : 0
+                });
+            })();
+            return true; // Will respond asynchronously
+
+        case 'return_transcript':
+            if (transcriptArray.length > 0) {
+                (async () => {
+                    const attendeeReport = await getAttendeeReport();
+                    console.log("[Teams Caption Saver] Sending transcript with attendee report:", {
+                        transcriptCount: transcriptArray.length,
+                        attendeeCount: attendeeReport ? attendeeReport.totalUniqueAttendees : 0,
+                        attendees: attendeeReport ? attendeeReport.attendeeList : []
+                    });
+                    chrome.runtime.sendMessage({
+                        message: "download_captions",
+                        transcriptArray: getCleanTranscript(),
+                        meetingTitle: meetingTitleOnStart,
+                        format: request.format,
+                        recordingStartTime: recordingStartTime ? recordingStartTime.toISOString() : new Date().toISOString(),
+                        attendeeReport: attendeeReport
+                    });
+                })();
+            } else {
+                alert("No captions were captured. Please ensure captions are turned on in the meeting.");
+            }
+            break;
+
+        case 'get_transcript_for_copying':
+            sendResponse({ transcriptArray: getCleanTranscript() });
             break;
 
         case 'get_captions_for_viewing':
-            console.log("get_captions_for_viewing request received:", transcriptArray);
-            
-            // Before sending, try to capture any recent captions that might not have been processed yet
-            console.log("Attempting to capture recent captions before viewing...");
-            lastCaptionTime = Date.now() - 6000; // Force silence detection
-            checkRecentCaptions();
-            
-            if (!capturing || transcriptArray.length === 0) {
-                alert("Oops! No captions were captured. Please make sure captions are turned on.");
-                sendResponse({success: false});
-                return;
+            if (transcriptArray.length > 0) {
+                chrome.runtime.sendMessage({
+                    message: "display_captions",
+                    transcriptArray: getCleanTranscript()
+                });
+            } else {
+                alert("No captions were captured. Please ensure captions are turned on in the meeting.");
             }
-
-            // Sort transcripts by the order they appear on screen (not by capture time)
-            const orderedForViewing = sortTranscriptsByScreenOrder();
-            
-            // Remove ID property from each item in the array before sending
-            const viewableTranscripts = orderedForViewing.map(({ID, ...rest}) => rest);
-            
-            chrome.runtime.sendMessage({
-                message: "display_captions",
-                transcriptArray: viewableTranscripts
-            });
-            sendResponse({success: true});
             break;
 
+        case 'get_unique_speakers':
+            const speakers = [...new Set(transcriptArray.map(item => item.Name))];
+            sendResponse({ speakers });
+            break;
+            
+        case 'get_attendee_report':
+            (async () => {
+                const attendeeReport = await getAttendeeReport();
+                sendResponse({ attendeeReport: attendeeReport });
+            })();
+            return true; // Will respond asynchronously
+        
         default:
-            sendResponse({success: false, error: "Unknown message"});
+            console.log("Unhandled message received in content script:", request.message);
             break;
     }
-    
-    return true; // Keep the message channel open for async response
+
+    return true; // Indicates an asynchronous response may be sent.
 });
 
-console.log("content_script.js is running");
+console.log("Teams Captions Saver content script is running.");

@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teams Transcript Viewer</title>
+    <style>
+        :root {
+            --primary-color: #0078d4;
+            --primary-text-color: #333;
+            --secondary-text-color: #666;
+            --background-color: #f5f5f5;
+            --surface-color: #ffffff;
+            --border-color: #e0e0e0;
+            --hover-color: #f0f8ff;
+            --success-color: #28a745;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--background-color);
+            color: var(--primary-text-color);
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: var(--surface-color);
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+
+        h1 {
+            text-align: center;
+            margin-top: 0;
+            margin-bottom: 24px;
+            position: relative;
+        }
+        
+        /* Live Indicator Styles */
+        .live-indicator {
+            display: inline-flex;
+            align-items: center;
+            margin-left: 15px;
+            padding: 4px 12px;
+            background: #f0f0f0;
+            border-radius: 20px;
+            font-size: 0.5em;
+            font-weight: normal;
+            color: #666;
+            vertical-align: middle;
+            opacity: 0.5;
+            transition: all 0.3s ease;
+        }
+        
+        .live-indicator.active {
+            background: #ff4444;
+            color: white;
+            opacity: 1;
+            animation: pulse 2s infinite;
+        }
+        
+        .live-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: currentColor;
+            border-radius: 50%;
+            margin-right: 6px;
+            animation: blink 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        
+        /* Auto-scroll button */
+        #auto-scroll-toggle {
+            margin-left: 10px;
+            background: #0078d4;
+            color: white;
+            transition: all 0.3s ease;
+        }
+        
+        #auto-scroll-toggle:not(.active) {
+            background: #ccc;
+            color: #666;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            align-items: center;
+            padding-bottom: 20px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .export-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        
+        .export-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border: 1px solid var(--primary-color);
+            background-color: var(--surface-color);
+            color: var(--primary-color);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background-color 0.2s, color 0.2s, transform 0.1s;
+        }
+        
+        .export-btn:hover {
+            background-color: var(--primary-color);
+            color: var(--surface-color);
+        }
+        
+        .export-btn:active {
+            transform: translateY(1px);
+        }
+        
+        .export-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        
+        .export-btn svg {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
+        }
+        
+        .export-btn.success {
+            background-color: var(--success-color);
+            border-color: var(--success-color);
+            color: white;
+        }
+
+        #search-box {
+            flex-grow: 1;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 14px;
+            min-width: 200px;
+        }
+        #search-box:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.3);
+        }
+
+        .speaker-filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .speaker-filters button {
+            padding: 6px 14px;
+            border: 1px solid var(--primary-color);
+            background-color: transparent;
+            color: var(--primary-color);
+            border-radius: 16px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: background-color 0.2s, color 0.2s;
+        }
+        .speaker-filters button:hover {
+            background-color: var(--hover-color);
+        }
+        .speaker-filters button.active {
+            background-color: var(--primary-color);
+            color: var(--surface-color);
+        }
+
+        main#captions-container {
+            position: relative;
+        }
+
+        .caption {
+            padding: 12px 50px 12px 0;
+            border-bottom: 1px solid #f0f0f0;
+            position: relative;
+        }
+        .caption:last-child {
+            border-bottom: none;
+        }
+        .caption:has(.copy-btn:hover),
+        .caption:hover .copy-btn {
+            opacity: 1;
+        }
+
+        .caption-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 6px;
+        }
+        .name {
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+        .time {
+            font-size: 0.85em;
+            color: var(--secondary-text-color);
+        }
+        .text {
+            color: var(--primary-text-color);
+        }
+
+        .copy-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            opacity: 0;
+            cursor: pointer;
+            border: none;
+            background: none;
+            padding: 6px;
+            border-radius: 4px;
+            transition: opacity 0.2s, background-color 0.2s, transform 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+        .copy-btn:hover {
+            background-color: #e9e9e9;
+        }
+        .copy-btn.copied {
+            transform: scale(1.1);
+        }
+        .copy-btn svg {
+            width: 16px;
+            height: 16px;
+            fill: #555;
+        }
+        .copy-btn.copied svg {
+            fill: var(--success-color);
+        }
+        
+        /* Tooltip styles for copy button */
+        .copy-btn .tooltip-text {
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #333;
+            color: white;
+            padding: 5px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+            z-index: 1000;
+            pointer-events: none;
+        }
+        
+        .copy-btn .tooltip-text::after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #333 transparent transparent transparent;
+        }
+        
+        .copy-btn:hover .tooltip-text {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .copy-btn.copied .tooltip-text {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .status-message {
+            text-align: center;
+            font-size: 1.1em;
+            color: var(--secondary-text-color);
+            padding: 40px 0;
+        }
+        
+        /* Session History Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.4);
+        }
+        
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 600px;
+            max-width: 90%;
+            border-radius: 8px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .close-modal {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            line-height: 20px;
+        }
+        
+        .close-modal:hover {
+            color: #000;
+        }
+        
+        .session-item {
+            padding: 12px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .session-item:hover {
+            background: #e9ecef;
+            border-color: #dee2e6;
+        }
+        
+        .session-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        
+        .session-meta {
+            font-size: 13px;
+            color: #6c757d;
+        }
+    </style>
+    <script src="viewer.js" defer></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Teams Transcript</h1>
+            <div class="controls">
+                <input type="search" id="search-box" placeholder="Search transcript..." aria-label="Search transcript">
+                <div id="speaker-filters" class="speaker-filters">
+                    <button id="show-all-btn" class="active" aria-label="Show all speakers">Show All</button>
+                </div>
+                <div class="export-controls">
+                    <button id="copy-all-btn" class="export-btn" title="Copy visible transcript to clipboard">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                        </svg>
+                        Copy All
+                    </button>
+                    <button id="save-all-btn" class="export-btn" title="Save visible transcript as file">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/>
+                        </svg>
+                        Save
+                    </button>
+                    <button id="history-btn" class="export-btn" title="Load previous session">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/>
+                        </svg>
+                        History
+                    </button>
+                </div>
+            </div>
+        </header>
+        <main id="captions-container">
+            <div class="status-message">Loading captions...</div>
+        </main>
+    </div>
+    
+    <!-- Session History Modal -->
+    <div id="sessionModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Previous Sessions</h2>
+                <span class="close-modal">&times;</span>
+            </div>
+            <div id="sessionListModal">
+                <div style="text-align: center; color: #999;">Loading sessions...</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

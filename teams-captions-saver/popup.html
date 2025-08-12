@@ -1,77 +1,524 @@
 <!doctype html>
 <html>
-
 <head>
-    <title>Chat Transcript Saver</title>
+    <title>Teams Transcript Saver</title>
+    <meta charset="UTF-8">
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f4f4f4;
             margin: 0;
-            padding: 0;
+            padding: 15px 20px;
+            width: 400px;
+            box-sizing: border-box;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            background-color: #f4f4f4;
-            height: 290px;
-            width: 320px;
         }
 
-        button {
-            margin: 10px;
-            padding: 10px 20px;
-            font-size: 16px;
-            border: none;
-            border-radius: 5px;
-            color: white;
-            background-color: #007BFF;
-            cursor: pointer;
-            transition: background-color 0.3s ease;
+        h2, p {
+            margin: 4px 0;
+            text-align: center;
         }
 
-        button:hover {
-            background-color: #0056b3;
+        .subtitle {
+            font-size: 14px;
+            font-style: italic;
+            font-weight: normal;
+            color: #555;
         }
 
-        #saveButton {
-            background-color: #28a745;
+        .info-text {
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 15px;
+            line-height: 1.5;
         }
 
-        #saveButton:hover {
-            background-color: #1e7e34;
+        .small-info-text {
+            font-size: 12px;
+            color: #6c757d;
+            width: 100%;
+            text-align: left;
+            margin-left: 2px;
         }
 
-        #viewButton {
-            background-color: #17a2b8;
+        #status-message {
+            font-weight: bold;
+            margin-top: 15px;
+            height: 20px;
         }
 
-        #viewButton:hover {
-            background-color: #138496;
+        #status-message a {
+            color: #17a2b8;
+            text-decoration: underline;
+            transition: color 0.3s ease;
+        }
+
+        #status-message a:hover {
+            color: #138496;
+        }
+
+        kbd {
+            background-color: #fafafa;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-shadow: 0 1px 0 #bbb;
+            color: #333;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 0.9em;
+            padding: 3px 6px;
+            margin: 0 2px;
         }
 
         .button-container {
             display: flex;
             flex-direction: row;
             justify-content: center;
+            width: 100%;
+            margin-top: 20px;
+            gap: 10px;
+        }
+        
+        button, .split-button > button {
+            padding: 10px;
+            font-size: 14px;
+            border: none;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s ease, opacity 0.3s ease;
+            white-space: nowrap;
         }
 
-        span {
+        button:disabled, .split-button > button:disabled {
+            background-color: #cccccc !important;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        #copyButton, #copyDropdownButton { background-color: #007bff; }
+        #copyButton:not(:disabled):hover, #copyDropdownButton:not(:disabled):hover { background-color: #0069d9; }
+        
+        #saveButton, #saveDropdownButton { background-color: #28a745; }
+        #saveButton:not(:disabled):hover, #saveDropdownButton:not(:disabled):hover { background-color: #1e7e34; }
+
+        #viewButton { 
+            background-color: #17a2b8; 
+            flex-grow: 1; 
+            border-radius: 6px; 
+        }
+        #viewButton:not(:disabled):hover { background-color: #138496; }
+
+        .split-button {
+            position: relative;
+            display: flex;
+            flex-grow: 1;
+        }
+        .split-button-main {
+            flex-grow: 1;
+            border-radius: 6px 0 0 6px;
+        }
+        .split-button-dropdown {
+            flex-grow: 0;
+            border-left: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 10px 8px;
+            margin-left: -1px;
+            border-radius: 0 6px 6px 0;
+        }
+        .split-button-options {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background-color: white;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+            z-index: 1;
+            width: 100%;
+            border-radius: 4px;
+            overflow: hidden;
+            padding: 5px 0;
+        }
+        .split-button-options a {
+            color: black;
+            padding: 10px 16px;
+            text-decoration: none;
+            display: block;
+            font-size: 14px;
+        }
+        .split-button-options a:hover { 
+            background-color: #f1f1f1; 
+        }
+        .dropdown-divider {
+            height: 1px;
+            margin: 5px 0;
+            overflow: hidden;
+            background-color: #e9ecef;
+        }
+        
+        /* --- Settings Sections --- */
+        .settings-container {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #ddd;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .settings-header {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin: 0 0 5px 0;
+            text-align: left;
+        }
+        .settings-subheader {
+            font-size: 14px;
+            font-weight: 600;
+            color: #555;
+            margin: 10px 0 5px 0;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        .setting-item {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 5px;
+        }
+        .setting-label {
+            font-size: 14px;
+            color: #333;
+        }
+        select#defaultSaveFormat {
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+
+        /* --- Toggle Switch --- */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 25px;
+            flex-shrink: 0;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 25px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 19px;
+            width: 19px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #28a745;
+        }
+        input:checked + .slider:before {
+            transform: translateX(25px);
+        }
+
+        /* --- Speaker Aliases --- */
+        .alias-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .alias-item label {
+            flex: 1;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .alias-item input {
+            flex: 2;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        #speaker-alias-list p {
+            font-size: 13px;
+            color: #666;
+            text-align: left;
+        }
+
+        /* --- AI Customization --- */
+        textarea#aiInstructions {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-family: inherit;
+            font-size: 13px;
+            resize: vertical;
+        }
+        .prompt-suggestion-container {
+            display: flex;
+            gap: 5px;
+            margin-top: 8px;
+            flex-wrap: wrap;
+        }
+        .prompt-button {
+            background-color: #e9ecef;
+            color: #495057;
+            border: 1px solid #dee2e6;
+            border-radius: 12px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+        }
+        .prompt-button:hover {
+            background-color: #dee2e6;
+            border-color: #ced4da;
+        }
+        
+        /* Session History Styles */
+        .session-item {
+            padding: 8px;
+            margin-bottom: 8px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .session-item:hover {
+            background: #e9ecef;
+            border-color: #dee2e6;
+        }
+        .session-title {
+            font-weight: 600;
+            color: #333;
+            display: block;
+            margin-bottom: 4px;
+        }
+        .session-meta {
             font-size: 12px;
             color: #6c757d;
-            padding: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .session-actions {
+            display: flex;
+            gap: 5px;
+            margin-top: 5px;
+        }
+        .session-btn {
+            padding: 4px 8px;
+            font-size: 11px;
+            border: 1px solid #dee2e6;
+            background: white;
+            color: #333;  /* Fix: Added text color */
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .session-btn:hover {
+            background: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+        .session-btn.delete {
+            color: #dc3545;  /* Red text for delete button */
+        }
+        .session-btn.delete:hover {
+            background: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+        .storage-info {
+            font-size: 11px;
+            color: #6c757d;
+            text-align: center;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #e9ecef;
         }
     </style>
     <script src="popup.js" defer></script>
 </head>
 
 <body>
-    <h2 id="popup-header">Captions Saver v3.6.3</h2>
-    <h3><i>New Teams Only</i></h3>
-    <span>To start, click More > Language and Speech > Turn on live captions</span>
+    <h2>Teams Captions Saver v4.5</h2>
+    <p class="subtitle">For Microsoft Teams on the Web</p>
+    
+    <p id="manual-start-info" class="info-text">To begin, turn on live captions in your Teams meeting.</p>
+
+    <p id="status-message">Checking status...</p>
+
     <div class="button-container">
-        <button id="saveButton">Save Captions</button>
-        <button id="viewButton">View Captions</button>
+        <div class="split-button" id="copy-container">
+            <button id="copyButton" class="split-button-main" disabled>Copy Transcript</button>
+            <button id="copyDropdownButton" class="split-button-dropdown" disabled>▾</button>
+            <div id="copyOptions" class="split-button-options">
+                <a href="#" data-copy-type="standard">Copy Standard Transcript</a>
+                <a href="#" data-copy-type="ai">Copy for AI Analysis</a>
+            </div>
+        </div>
+        <div class="split-button" id="save-container">
+            <button id="saveButton" class="split-button-main" disabled>Save as TXT</button>
+            <button id="saveDropdownButton" class="split-button-dropdown" disabled>▾</button>
+            <div id="saveOptions" class="split-button-options">
+                <a href="#" data-format="txt">Save as TXT (.txt)</a>
+                <a href="#" data-format="md">Save as Markdown (.md)</a>
+                <a href="#" data-format="doc">Save as Word (.doc)</a>
+                <a href="#" data-format="json">Save as JSON (.json)</a>
+                <div class="dropdown-divider"></div>
+                <a href="#" data-format="ai">Save for AI Analysis (.txt)</a>
+            </div>
+        </div>
+    </div>
+    <div class="button-container">
+         <button id="viewButton" disabled>View Transcript</button>
+    </div>
+    
+    <!-- Session History -->
+    <div id="sessionHistory" class="button-container" style="margin-top: 10px; display: none;">
+        <button id="historyButton" style="background-color: #6c757d; flex-grow: 1; border-radius: 6px;">
+            📁 View Previous Sessions
+        </button>
+    </div>
+    <div id="sessionList" style="display: none; margin-top: 10px; max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px; padding: 10px;">
+        <div style="text-align: center; color: #999;">Loading sessions...</div>
+    </div>
+
+    <div class="settings-container">
+        <h3 class="settings-header">Settings</h3>
+
+        <div class="settings-group">
+            <p class="settings-subheader">Session Settings</p>
+            <div id="speaker-alias-container">
+                 <label class="setting-label" style="margin-bottom: 10px;">Speaker Aliases</label>
+                 <div id="speaker-alias-list"><p>Start capturing to see the speaker list.</p></div>
+            </div>
+        </div>
+
+        <div class="settings-group">
+            <p class="settings-subheader">Export & Automation</p>
+            <div class="setting-item">
+                <label for="defaultSaveFormat" class="setting-label">Default Save Format</label>
+                <select id="defaultSaveFormat">
+                    <option value="txt">TXT</option>
+                    <option value="md">Markdown</option>
+                    <option value="doc">Word</option>
+                    <option value="json">JSON</option>
+                    <option value="ai">AI Analysis</option>
+                </select>
+            </div>
+            <div class="setting-item">
+                <label for="autoSaveOnEndToggle" class="setting-label">Auto-Save on Meeting End</label>
+                <label class="toggle-switch"><input type="checkbox" id="autoSaveOnEndToggle"><span class="slider"></span></label>
+            </div>
+             <p class="small-info-text">Automatically saves in your default format when you leave a meeting.</p>
+        </div>
+
+        <div class="settings-group">
+            <p class="settings-subheader">Capture Settings</p>
+            <div class="setting-item">
+                <label for="trackCaptionsToggle" class="setting-label">Track Live Captions</label>
+                <label class="toggle-switch"><input type="checkbox" id="trackCaptionsToggle" checked><span class="slider"></span></label>
+            </div>
+            <p class="small-info-text">Capture and save meeting captions when available.</p>
+            <div class="setting-item">
+                <label for="trackAttendeesToggle" class="setting-label">Track Meeting Attendees</label>
+                <label class="toggle-switch"><input type="checkbox" id="trackAttendeesToggle"><span class="slider"></span></label>
+            </div>
+            <p class="small-info-text">Monitor who joins/leaves the meeting and include in exports.</p>
+            
+            <p class="settings-subheader">Automation Settings</p>
+            <div class="setting-item">
+                <label for="autoEnableCaptionsToggle" class="setting-label">Auto-open Live Captions</label>
+                <label class="toggle-switch"><input type="checkbox" id="autoEnableCaptionsToggle"><span class="slider"></span></label>
+            </div>
+            <p class="small-info-text">Automatically enable Teams captions when joining a meeting.</p>
+            <div class="setting-item">
+                <label for="autoOpenAttendeesToggle" class="setting-label">Auto-open Attendee Panel</label>
+                <label class="toggle-switch"><input type="checkbox" id="autoOpenAttendeesToggle"><span class="slider"></span></label>
+            </div>
+            <p class="small-info-text">Automatically open roster panel for attendee tracking (requires "Track Meeting Attendees" to be enabled).</p>
+            <div class="setting-item">
+                <label for="timestampFormat" class="setting-label">Timestamp Format</label>
+                <select id="timestampFormat" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+                    <option value="12hr">12-hour (2:30:45 PM)</option>
+                    <option value="24hr">24-hour (14:30:45)</option>
+                    <option value="relative">Relative (00:30:45)</option>
+                </select>
+            </div>
+            <div class="setting-item">
+                <label for="filenamePattern" class="setting-label">Filename Pattern</label>
+                <input type="text" id="filenamePattern" 
+                    value="{date}_{title}_{format}" 
+                    placeholder="{date}_{title}_{format}"
+                    style="width: 100%; padding: 5px; border-radius: 4px; border: 1px solid #ccc; font-size: 13px;">
+            </div>
+            <p class="small-info-text">Variables: {date}, {time}, {title}, {format}, {attendees}</p>
+        </div>
+
+        <div class="settings-group">
+             <p class="settings-subheader">AI Customization</p>
+             <label for="aiInstructions" class="setting-label" style="margin-bottom: 5px;">Custom AI Instructions</label>
+             <p class="small-info-text" style="margin: 0 0 8px 0;">This text is used for "Copy/Save for AI" actions.</p>
+             <textarea id="aiInstructions" rows="4" placeholder="Example: Summarize this transcript into key action items..."></textarea>
+            <div style="margin: 8px 0;">
+                <label for="meetingType" class="setting-label" style="font-size: 12px;">Meeting Type Templates:</label>
+                <div style="display: flex; gap: 5px; margin-bottom: 8px;">
+                    <select id="meetingType" style="flex: 1; padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+                        <option value="">-- Select Template --</option>
+                        <optgroup label="Built-in Templates">
+                            <option value="executive">Executive Summary</option>
+                            <option value="standup">Daily Standup</option>
+                            <option value="retrospective">Retrospective</option>
+                            <option value="planning">Sprint Planning</option>
+                            <option value="review">Design Review</option>
+                            <option value="interview">Interview</option>
+                            <option value="allhands">All Hands</option>
+                            <option value="1on1">One-on-One</option>
+                            <option value="brainstorm">Brainstorming</option>
+                        </optgroup>
+                        <optgroup label="Custom Templates" id="customTemplatesGroup">
+                        </optgroup>
+                    </select>
+                    <button id="deleteTemplateBtn" style="padding: 5px 10px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; display: none;" title="Delete selected custom template">🗑️</button>
+                </div>
+                <div style="display: flex; gap: 5px;">
+                    <input type="text" id="templateName" placeholder="Template name..." style="flex: 1; padding: 5px; border-radius: 4px; border: 1px solid #ccc; font-size: 13px;">
+                    <button id="saveTemplateBtn" style="padding: 5px 15px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;" title="Save current instructions as template">Save Template</button>
+                </div>
+            </div>
+            <div class="prompt-suggestion-container">
+                <button class="prompt-button">Summarize</button>
+                <button class="prompt-button">List Action Items</button>
+                <button class="prompt-button">Find Decisions</button>
+            </div>
+        </div>
     </div>
 </body>
-
 </html>
