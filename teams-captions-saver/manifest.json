@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "MS Teams Live Captions Saver",
   "version": "4.5",
-  "description": "Capture and save live captions from Microsoft Teams meetings on the web. Features include various save formats, AI summaries, and automation.",
+  "description": "Capture and save live captions from Microsoft Teams meetings on the web.",
   "homepage_url": "https://spdenis.com",
   "icons": {
     "16": "icon.png",
