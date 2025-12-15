@@ -6,6 +6,8 @@ const transcriptArray = JSON.parse(localStorage.getItem("transcripts")) || [];
 let transcriptIdCounter = 0; // Since IDs are not reliable in new structure
 
 function checkTranscripts() {
+    // const closedCaptionsContainer = document.querySelector("[data-tid='closed-captions-renderer']");
+    // Teams v2 - Updated for new HTML structure
     const closedCaptionsContainer = document.querySelector("[data-tid='closed-caption-v2-window-wrapper']");
     if (!closedCaptionsContainer) {
         // alert("Please, click 'More' > 'Language and speech' > 'Turn on live captions'");
@@ -61,7 +63,8 @@ function checkTranscripts() {
 const observer = new MutationObserver(checkTranscripts);
 
 // Observe the captions container more specifically if it exists
-const captionsContainer = document.querySelector("[data-tid='closed-captions-renderer']");
+// const captionsContainer = document.querySelector("[data-tid='closed-captions-renderer']");
+const captionsContainer = document.querySelector("[data-tid='closed-caption-v2-window-wrapper']");
 if (captionsContainer) {
     observer.observe(captionsContainer, {
         childList: true,
