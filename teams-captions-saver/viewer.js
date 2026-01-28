@@ -705,7 +705,12 @@ document.addEventListener('DOMContentLoaded', () => {
     async function setupLiveStreaming() {
         // Check if content script is available and streaming
         try {
-            const tabs = await chrome.tabs.query({ url: "https://teams.microsoft.com/*" });
+            const tabs = await chrome.tabs.query({ 
+                url: [
+                    "https://teams.microsoft.com/*",
+                    "https://teams.cloud.microsoft/*"
+                ]
+            });
             if (tabs.length > 0) {
                 const response = await chrome.tabs.sendMessage(tabs[0].id, { message: "viewer_ready" });
                 if (response && response.streaming) {
@@ -778,7 +783,12 @@ document.addEventListener('DOMContentLoaded', () => {
             await addMeetingEndedMessage();
             
             // Try to reconnect
-            const tabs = await chrome.tabs.query({ url: "https://teams.microsoft.com/*" });
+            const tabs = await chrome.tabs.query({ 
+                url: [
+                    "https://teams.microsoft.com/*",
+                    "https://teams.cloud.microsoft/*"
+                ]
+            });
             if (tabs.length > 0) {
                 try {
                     const response = await chrome.tabs.sendMessage(tabs[0].id, { message: "viewer_ready" });

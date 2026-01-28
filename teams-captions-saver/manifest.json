@@ -17,7 +17,8 @@
   ],
 
   "host_permissions": [
-    "https://teams.microsoft.com/*"
+    "https://teams.microsoft.com/*",
+    "https://teams.cloud.microsoft/*"
   ],
 
   "action": {
@@ -30,10 +31,15 @@
     "service_worker": "service_worker.js"
   },
 
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+
   "content_scripts": [
     {
       "matches": [
-        "https://teams.microsoft.com/*"
+        "https://teams.microsoft.com/*",
+        "https://teams.cloud.microsoft/*"
       ],
       "js": [
         "content_script.js"
@@ -49,7 +55,8 @@
         "sessionManager.js"
       ],
       "matches": [
-        "<all_urls>"
+        "https://teams.microsoft.com/*",
+        "https://teams.cloud.microsoft/*"
       ]
     }
   ]
