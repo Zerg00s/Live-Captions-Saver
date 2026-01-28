@@ -65,7 +65,10 @@ function escapeHtml(str) {
 
 async function getActiveTeamsTab() {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const teamsTab = tabs.find(tab => tab.url?.startsWith("https://teams.microsoft.com"));
+    const teamsTab = tabs.find(tab => 
+        tab.url?.startsWith("https://teams.microsoft.com") ||
+        tab.url?.startsWith("https://teams.cloud.microsoft")
+    );
     return teamsTab || null;
 }
 
@@ -736,7 +739,7 @@ async function initializePopup() {
 
     const tab = await getActiveTeamsTab();
     if (!tab) {
-        UI_ELEMENTS.statusMessage.innerHTML = 'Please <a href="https://teams.microsoft.com" target="_blank">open a Teams tab</a> to use this extension.';
+        UI_ELEMENTS.statusMessage.innerHTML = 'Please open a Teams tab at <a href="https://teams.microsoft.com" target="_blank">teams.microsoft.com</a> or <a href="https://teams.cloud.microsoft" target="_blank">teams.cloud.microsoft</a> to use this extension.';
         UI_ELEMENTS.statusMessage.style.color = '#dc3545';
         return;
     }

@@ -17,7 +17,8 @@
   ],
 
   "host_permissions": [
-    "https://teams.microsoft.com/*"
+    "https://teams.microsoft.com/*",
+    "https://teams.cloud.microsoft/*"
   ],
 
   "action": {
@@ -37,7 +38,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://teams.microsoft.com/*"
+        "https://teams.microsoft.com/*",
+        "https://teams.cloud.microsoft/*"
       ],
       "js": [
         "content_script.js"
@@ -53,7 +55,8 @@
         "sessionManager.js"
       ],
       "matches": [
-        "https://teams.microsoft.com/*"
+        "https://teams.microsoft.com/*",
+        "https://teams.cloud.microsoft/*"
       ]
     }
   ]
