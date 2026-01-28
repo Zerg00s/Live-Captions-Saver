@@ -708,7 +708,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const tabs = await chrome.tabs.query({ 
                 url: [
                     "https://teams.microsoft.com/*",
-                    "https://teams.cloud.microsoft/*"
+                    "https://teams.cloud.microsoft/*",
+                    "https://teams.live.com/*"
                 ]
             });
             if (tabs.length > 0) {

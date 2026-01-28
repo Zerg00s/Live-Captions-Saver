@@ -67,7 +67,8 @@ async function getActiveTeamsTab() {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const teamsTab = tabs.find(tab => 
         tab.url?.startsWith("https://teams.microsoft.com") ||
-        tab.url?.startsWith("https://teams.cloud.microsoft")
+        tab.url?.startsWith("https://teams.cloud.microsoft") || 
+        tab.url?.startsWith("https://teams.live.com") 
     );
     return teamsTab || null;
 }

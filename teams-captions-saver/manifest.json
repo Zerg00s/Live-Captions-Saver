@@ -18,7 +18,8 @@
 
   "host_permissions": [
     "https://teams.microsoft.com/*",
-    "https://teams.cloud.microsoft/*"
+    "https://teams.cloud.microsoft/*",
+    "https://teams.live.com/*"
   ],
 
   "action": {
@@ -39,7 +40,8 @@
     {
       "matches": [
         "https://teams.microsoft.com/*",
-        "https://teams.cloud.microsoft/*"
+        "https://teams.cloud.microsoft/*",
+        "https://teams.live.com*"
       ],
       "js": [
         "content_script.js"
@@ -56,7 +58,8 @@
       ],
       "matches": [
         "https://teams.microsoft.com/*",
-        "https://teams.cloud.microsoft/*"
+        "https://teams.cloud.microsoft/*",
+        "https://teams.live.com/*"
       ]
     }
   ]
