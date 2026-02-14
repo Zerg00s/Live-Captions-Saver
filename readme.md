@@ -1,6 +1,6 @@
 ![](IMG/logo.png)
 
-# MS Teams Live Captions Saver Browser Extension v4.8
+# MS Teams Live Captions Saver Browser Extension v4.8.1
 
 The MS Teams Live Captions Saver is a powerful Chrome extension that captures, saves, and analyzes live captions from Microsoft Teams meetings. With advanced features like AI-powered summaries, speaker tracking, attendee monitoring, and automated exports, it's the perfect tool for meeting documentation and accessibility.
 
@@ -227,8 +227,3 @@ For issues, feature requests, or questions:
 - Check existing issues for solutions
 - Provide detailed reproduction steps for bugs
 
----
-
-**Version:** 4.8  
-**Last Updated:** August 2025  
-**Compatibility:** Chrome/Edge/Brave with Manifest V3
