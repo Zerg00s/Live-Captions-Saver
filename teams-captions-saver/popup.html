@@ -363,6 +363,7 @@
             border-top: 1px solid #e9ecef;
         }
     </style>
+    <script src="idbStorage.js" defer></script>
     <script src="popup.js" defer></script>
 </head>
 
@@ -400,6 +401,15 @@
          <button id="viewButton" disabled>View Transcript</button>
     </div>
     
+    <!-- Crash Recovery Banner -->
+    <div id="recoveryBanner" style="display: none; margin-top: 10px; padding: 10px; background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; font-size: 13px; color: #664d03;">
+        <div id="recoveryBannerText" style="margin-bottom: 8px;">⚠️ A meeting interrupted by a crash was recovered to history.</div>
+        <div style="display: flex; gap: 8px;">
+            <button id="viewRecoveredButton" style="flex-grow: 1; padding: 4px 8px; font-size: 12px; background-color: #ffc107; color: #664d03; border: none; border-radius: 4px; cursor: pointer;">View</button>
+            <button id="dismissRecoveryButton" style="flex-grow: 1; padding: 4px 8px; font-size: 12px; background-color: transparent; color: #664d03; border: 1px solid #ffc107; border-radius: 4px; cursor: pointer;">Dismiss</button>
+        </div>
+    </div>
+
     <!-- Session History -->
     <div id="sessionHistory" class="button-container" style="margin-top: 10px; display: none;">
         <button id="historyButton" style="background-color: #6c757d; flex-grow: 1; border-radius: 6px;">

@@ -1,3 +1,5 @@
+importScripts('idbStorage.js');
+
 // --- Utility Functions ---
 function getSanitizedMeetingName(fullTitle) {
     if (!fullTitle) return "Meeting";
@@ -9,6 +11,12 @@ function getSanitizedMeetingName(fullTitle) {
     return cleanedName.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_') || "Meeting";
 }
 
+
+// Comparable meeting identity from a document.title. Must stay in sync with the
+// copy in content_script.js.
+function normalizeMeetingTitle(fullTitle) {
+    return getSanitizedMeetingName(fullTitle).replace(/^\(\d+\)\s*/, '').trim().toLowerCase();
+}
 
 function applyAliasesToTranscript(transcriptArray, aliases = {}) {
     if (Object.keys(aliases).length === 0) {
@@ -149,11 +157,10 @@ async function formatForAi(transcript, meetingName, recordingStartTime, attendee
 
 // A simple HTML escaper for the .doc format
 function escapeHtml(str) {
-    return str.replace(/&/g, "&")
-              .replace(/</g, "<")
-              .replace(/>/g, ">")
+    return str.replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;")
               .replace(/"/g, "&quot;")
-            //   .replace(/'/g, "'");
               .replace(/'/g, "&#039;");
 }
 
@@ -165,18 +172,6 @@ async function downloadFile(filename, content, mimeType, saveAs) {
         filename: filename,
         saveAs: saveAs
     });
-    
-    // Notify viewer that transcript was saved
-    try {
-        const tabs = await chrome.tabs.query({});
-        for (const tab of tabs) {
-            if (tab.url && tab.url.includes('viewer.html')) {
-                chrome.tabs.sendMessage(tab.id, { message: 'transcript_saved' });
-            }
-        }
-    } catch (error) {
-        // Silent fail if viewer is not open
-    }
 }
 
 async function generateFilename(pattern, meetingTitle, format, attendeeReport) {
@@ -223,7 +218,7 @@ async function saveTranscript(meetingTitle, transcriptArray, aliases, format, re
         case 'json':
             // For JSON, include both transcript and attendee data
             const jsonData = {
-                meetingTitle: meetingName,
+                meetingTitle: meetingTitle,
                 recordingStartTime,
                 transcript: processedTranscript,
                 attendees: processedAttendeeReport
@@ -238,7 +233,7 @@ async function saveTranscript(meetingTitle, transcriptArray, aliases, format, re
             mimeType = 'application/msword';
             break;
         case 'ai':
-            content = await formatForAi(processedTranscript, meetingName, recordingStartTime, processedAttendeeReport);
+            content = await formatForAi(processedTranscript, meetingTitle, recordingStartTime, processedAttendeeReport);
             extension = 'txt';
             mimeType = 'text/plain';
             break;
@@ -274,47 +269,91 @@ function updateBadge(isCapturing) {
     }
 }
 
-// --- Event Listeners ---
-// Helper function to chunk arrays
-function chunkArray(array, chunkSize) {
-    const chunks = [];
-    for (let i = 0; i < array.length; i += chunkSize) {
-        chunks.push(array.slice(i, i + chunkSize));
+// --- Migration from chrome.storage.local to IndexedDB (one-time, retry-safe) ---
+async function migrateIfNeeded() {
+    const { idb_migrated_v1 } = await chrome.storage.local.get('idb_migrated_v1');
+    if (idb_migrated_v1) return;
+
+    const keysToRemove = [];
+
+    // Old committed sessions: session_index + per-session chunk/attendee keys
+    const { session_index = [] } = await chrome.storage.local.get('session_index');
+    for (const meta of session_index) {
+        const chunkKeys = [];
+        for (let i = 0; i < (meta.chunkCount || 0); i++) {
+            chunkKeys.push(`${meta.id}_chunk_${i}`);
+        }
+        const stored = await chrome.storage.local.get([...chunkKeys, `${meta.id}_attendees`]);
+        const transcript = chunkKeys.flatMap(key => stored[key] || []);
+        await captionsDB.importMeeting({
+            id: meta.id,
+            title: meta.title || 'Untitled Meeting',
+            startedAt: meta.timestamp || new Date().toISOString(),
+            endedAt: meta.timestamp || null,
+            lastFlush: meta.timestamp || new Date().toISOString(),
+            status: 'complete',
+            captionCount: transcript.length,
+            duration: meta.duration || '0 min',
+            speakers: meta.speakers || [],
+            attendees: meta.attendees,
+            attendeeCount: meta.attendeeCount || 0,
+            preview: meta.preview || '',
+            attendeeReport: stored[`${meta.id}_attendees`] || null,
+            migratedFrom: 'storage.local'
+        }, transcript);
+        keysToRemove.push(...chunkKeys, `${meta.id}_attendees`);
     }
-    return chunks;
+    if (session_index.length > 0) keysToRemove.push('session_index');
+
+    // Orphaned crash backup from the old code: surface it as a recovered meeting
+    const { transcriptBackup } = await chrome.storage.local.get('transcriptBackup');
+    if (transcriptBackup?.transcript?.length > 5) {
+        const startedAt = transcriptBackup.recordingStartTime || transcriptBackup.lastBackup || new Date().toISOString();
+        await captionsDB.importMeeting({
+            id: `recovered_backup_${new Date(startedAt).getTime()}`,
+            title: transcriptBackup.meetingTitle || 'Untitled Meeting',
+            startedAt: startedAt,
+            endedAt: null,
+            lastFlush: transcriptBackup.lastBackup || startedAt,
+            status: 'recovered',
+            recoveredAt: new Date().toISOString(),
+            recoveredAcknowledged: false,
+            captionCount: transcriptBackup.transcript.length,
+            duration: '',
+            speakers: [...new Set(transcriptBackup.transcript.map(c => c.Name))].slice(0, 10),
+            attendeeCount: 0,
+            preview: transcriptBackup.transcript.slice(0, 3).map(c => `${c.Name}: ${c.Text.substring(0, 50)}`).join(' | '),
+            attendeeReport: transcriptBackup.attendeeData || null,
+            migratedFrom: 'transcriptBackup'
+        }, transcriptBackup.transcript);
+    }
+    if (transcriptBackup) keysToRemove.push('transcriptBackup');
+
+    // Only after every import committed: remove old keys, then set the flag.
+    if (keysToRemove.length > 0) {
+        await chrome.storage.local.remove(keysToRemove);
+    }
+    await chrome.storage.local.set({ idb_migrated_v1: true });
+    console.log(`[Service Worker] Migrated ${session_index.length} session(s) to IndexedDB`);
 }
 
-// Helper function to calculate duration
-function calculateDuration(transcriptArray) {
-    if (!transcriptArray || transcriptArray.length === 0) return '0 min';
-    
+// Runs on every service worker wake: persist storage, migrate old data, and
+// promote stale 'live' meetings (crashed mid-meeting) to 'recovered'.
+const dbReady = (async () => {
+    try { await navigator.storage.persist(); } catch (e) { /* best effort */ }
     try {
-        const firstTime = new Date(transcriptArray[0].Time);
-        const lastTime = new Date(transcriptArray[transcriptArray.length - 1].Time);
-        
-        // Check if dates are valid
-        if (isNaN(firstTime.getTime()) || isNaN(lastTime.getTime())) {
-            // Fallback: estimate based on caption count (avg 3 seconds per caption)
-            const estimatedMinutes = Math.round((transcriptArray.length * 3) / 60);
-            return `~${estimatedMinutes} min`;
-        }
-        
-        const durationMs = lastTime - firstTime;
-        const minutes = Math.round(durationMs / 60000);
-        
-        if (minutes < 60) {
-            return `${minutes} min`;
-        } else {
-            const hours = Math.floor(minutes / 60);
-            const mins = minutes % 60;
-            return `${hours}h ${mins}m`;
-        }
+        await migrateIfNeeded();
     } catch (error) {
-        // If all else fails, show caption count
-        return `${transcriptArray.length} captions`;
+        console.error('[Service Worker] Migration failed (will retry on next wake):', error);
     }
-}
+    try {
+        await captionsDB.scanAndRecover();
+    } catch (error) {
+        console.error('[Service Worker] Recovery scan failed:', error);
+    }
+})();
 
+// --- Event Listeners ---
 chrome.runtime.onInstalled.addListener(() => {
     updateBadge(false);
 });
@@ -324,105 +363,134 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // Viewer-bound broadcasts also pass through this listener; the service worker has
+    // nothing to do for them, and returning false lets the sender resolve immediately.
+    const VIEWER_BROADCASTS = ['live_caption_update', 'meeting_ended'];
+    if (VIEWER_BROADCASTS.includes(message.message)) {
+        return false;
+    }
+
     (async () => {
-        const { speakerAliases } = await chrome.storage.session.get('speakerAliases');
+        await dbReady;
 
         switch (message.message) {
-            case 'save_session_history':
-                // Save meeting to session history using chrome.storage directly
+            case 'flush_meeting':
+                // Periodic crash-safety snapshot of an in-progress meeting
                 try {
-                    // Since we can't import in service worker, implement inline
-                    const sessionId = `session_${Date.now()}`;
-                    const transcriptArray = message.transcriptArray;
-                    const meetingTitle = message.meetingTitle;
-                    const attendeeReport = message.attendeeReport;
-                    
-                    // Create session metadata
-                    const metadata = {
-                        id: sessionId,
-                        title: meetingTitle || 'Untitled Meeting',
-                        timestamp: new Date().toISOString(),
-                        date: new Date().toLocaleDateString(),
-                        time: new Date().toLocaleTimeString(),
-                        captionCount: transcriptArray.length,
-                        duration: calculateDuration(transcriptArray),
-                        speakers: [...new Set(transcriptArray.map(c => c.Name))].slice(0, 10),
-                        attendees: attendeeReport?.attendeeList?.slice(0, 20),
-                        attendeeCount: attendeeReport?.totalUniqueAttendees || 0,
-                        preview: transcriptArray.slice(0, 3).map(c => `${c.Name}: ${c.Text.substring(0, 50)}`).join(' | ')
-                    };
-                    
-                    // Save transcript in chunks to avoid size limits
-                    const chunks = chunkArray(transcriptArray, 100); // 100 items per chunk
-                    for (let i = 0; i < chunks.length; i++) {
-                        await chrome.storage.local.set({
-                            [`${sessionId}_chunk_${i}`]: chunks[i]
-                        });
-                    }
-                    metadata.chunkCount = chunks.length;
-                    
-                    // Save attendee report if exists
-                    if (attendeeReport) {
-                        await chrome.storage.local.set({
-                            [`${sessionId}_attendees`]: attendeeReport
-                        });
-                    }
-                    
-                    // Update session index
-                    const { session_index = [] } = await chrome.storage.local.get('session_index');
-                    session_index.push(metadata);
-                    
-                    // Keep only last 10 sessions
-                    if (session_index.length > 10) {
-                        const toDelete = session_index.shift();
-                        // Clean up old session data
-                        const keysToDelete = [];
-                        for (let i = 0; i < toDelete.chunkCount; i++) {
-                            keysToDelete.push(`${toDelete.id}_chunk_${i}`);
-                        }
-                        keysToDelete.push(`${toDelete.id}_attendees`);
-                        await chrome.storage.local.remove(keysToDelete);
-                    }
-                    
-                    // Sort by timestamp (newest first)
-                    session_index.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                    
-                    await chrome.storage.local.set({ 'session_index': session_index });
-                    console.log('[Service Worker] Session saved to history:', sessionId);
-                    
+                    await captionsDB.flushMeeting({
+                        id: message.meetingId,
+                        title: message.meetingTitle,
+                        startedAt: message.recordingStartTime,
+                        transcript: message.transcriptArray,
+                        attendeeReport: message.attendeeReport
+                    });
+                } catch (error) {
+                    console.error('[Service Worker] Failed to flush meeting:', error);
+                }
+                break;
+
+            case 'save_session_history':
+                try {
+                    await captionsDB.finalizeMeeting({
+                        id: message.meetingId || `meeting_${Date.now()}`,
+                        title: message.meetingTitle,
+                        startedAt: message.recordingStartTime,
+                        transcript: message.transcriptArray,
+                        attendeeReport: message.attendeeReport
+                    });
+                    await captionsDB.pruneIfNeeded();
+                    console.log('[Service Worker] Meeting saved to history:', message.meetingId);
                 } catch (error) {
                     console.error('[Service Worker] Failed to save session:', error);
                 }
                 break;
-                
-            case 'download_captions':
+
+            case 'get_resumable_meeting':
+                // Rejoin detection: most recent meeting with the same normalized title
+                // that was still being written to within the last 10 minutes
+                try {
+                    const normTitle = normalizeMeetingTitle(message.meetingTitle);
+                    const cutoff = Date.now() - 10 * 60 * 1000;
+                    const index = await captionsDB.getMeetingIndex();
+                    const candidate = index.find(m =>
+                        m.id !== message.excludeId &&
+                        m.captionCount > 0 &&
+                        normalizeMeetingTitle(m.title) === normTitle &&
+                        new Date(m.lastFlush).getTime() > cutoff
+                    );
+                    sendResponse({
+                        candidate: candidate
+                            ? { id: candidate.id, title: candidate.title, captionCount: candidate.captionCount }
+                            : null
+                    });
+                } catch (error) {
+                    console.error('[Service Worker] Resumable lookup failed:', error);
+                    sendResponse({ candidate: null });
+                }
+                break;
+
+            case 'get_meeting_transcript':
+                try {
+                    const { meta, transcript } = await captionsDB.getMeeting(message.meetingId);
+                    sendResponse({ transcript, startedAt: meta.startedAt });
+                } catch (error) {
+                    console.error('[Service Worker] Transcript fetch failed:', error);
+                    sendResponse({ transcript: null });
+                }
+                break;
+
+            case 'delete_meeting':
+                // Used to drop the short-lived interim record after a merge
+                try {
+                    await captionsDB.deleteMeeting(message.meetingId);
+                } catch (error) {
+                    console.error('[Service Worker] Delete failed:', error);
+                }
+                break;
+
+            case 'check_recovery':
+                // Popup asks on open: promote any stale live meetings, report unacknowledged ones
+                try {
+                    await captionsDB.scanAndRecover();
+                    sendResponse({ recovered: await captionsDB.getUnacknowledgedRecovered() });
+                } catch (error) {
+                    console.error('[Service Worker] Recovery check failed:', error);
+                    sendResponse({ recovered: [] });
+                }
+                break;
+
+
+            case 'download_captions': {
                 console.log('[Teams Caption Saver] Download request received:', {
                     format: message.format,
                     transcriptCount: message.transcriptArray?.length,
                     hasAttendeeReport: !!message.attendeeReport,
                     attendeeCount: message.attendeeReport?.totalUniqueAttendees || 0
                 });
+                const { speakerAliases } = await chrome.storage.session.get('speakerAliases');
                 await saveTranscript(message.meetingTitle, message.transcriptArray, speakerAliases, message.format, message.recordingStartTime, true, message.attendeeReport);
                 break;
+            }
 
-            case 'save_on_leave':
+            case 'save_on_leave': {
                 // Generate unique ID for this save request
                 const saveId = `${message.meetingTitle}_${message.recordingStartTime}`;
-                
+
                 // Prevent duplicate saves
                 if (autoSaveInProgress || lastAutoSaveId === saveId) {
                     console.log('Auto-save already in progress or completed for this meeting, skipping...');
                     break;
                 }
-                
+
                 autoSaveInProgress = true;
                 lastAutoSaveId = saveId;
-                
+
                 try {
                     const settings = await chrome.storage.sync.get(['autoSaveOnEnd', 'defaultSaveFormat']);
                     if (settings.autoSaveOnEnd && message.transcriptArray.length > 0) {
                         const formatToSave = settings.defaultSaveFormat || 'txt';
                         console.log(`Auto-saving transcript in ${formatToSave.toUpperCase()} format.`);
+                        const { speakerAliases } = await chrome.storage.session.get('speakerAliases');
                         await saveTranscript(message.meetingTitle, message.transcriptArray, speakerAliases, formatToSave, message.recordingStartTime, false, message.attendeeReport);
                         console.log('Auto-save completed successfully.');
                     }
@@ -434,6 +502,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     autoSaveInProgress = false;
                 }
                 break;
+            }
 
             case 'display_captions':
                 await createViewerTab(message.transcriptArray);
@@ -445,6 +514,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 if (message.capturing) {
                     lastAutoSaveId = null;
                     autoSaveInProgress = false;
+                    // Clear speaker aliases from the previous meeting. Must happen here:
+                    // content scripts have no access to chrome.storage.session.
+                    await chrome.storage.session.remove('speakerAliases');
                     console.log('New capture session started, auto-save state reset.');
                 }
                 break;
@@ -455,7 +527,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 // Could implement error reporting here
                 break;
         }
-    })();
-    
+    })().then(
+        // Always settle the channel: senders that await fire-and-forget messages
+        // (flush_meeting, save_on_leave, ...) would otherwise get spurious
+        // "message channel closed" rejections. Cases that already responded are
+        // unaffected - a second sendResponse call is ignored.
+        () => { try { sendResponse({ ok: true }); } catch (e) { /* channel gone */ } },
+        (error) => {
+            console.error('[Service Worker] Message handling failed:', message.message, error);
+            try { sendResponse({ ok: false, error: String(error) }); } catch (e) { /* channel gone */ }
+        }
+    );
+
     return true; // Indicates that the response will be sent asynchronously
 });

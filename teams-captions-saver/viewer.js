@@ -13,8 +13,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- State ---
     let allCaptions = [];
     let searchDebounceTimer = null;
-    let meetingStartTime = null;
-    let meetingEndTime = null;
     const SEARCH_DEBOUNCE_DELAY = 300;
     
     // Live streaming state
@@ -33,16 +31,30 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // --- Helper Functions ---
+    // Case-insensitive highlight built from DOM nodes: no regex (metacharacters in
+    // the search term used to throw and freeze the update pipeline) and no innerHTML
+    // (caption text containing markup was re-injected unescaped).
     function highlightSearchTerm(element, searchTerm) {
         if (!searchTerm) return;
-        
+
         const textElement = element.querySelector('.text');
         if (!textElement) return;
-        
+
         const text = textElement.textContent;
-        const regex = new RegExp(`(${searchTerm})`, 'gi');
-        const highlightedText = text.replace(regex, '<mark>$1</mark>');
-        textElement.innerHTML = highlightedText;
+        const lower = text.toLowerCase();
+        const needle = searchTerm.toLowerCase();
+
+        textElement.textContent = '';
+        let pos = 0;
+        let idx;
+        while ((idx = lower.indexOf(needle, pos)) !== -1) {
+            textElement.append(text.slice(pos, idx));
+            const mark = document.createElement('mark');
+            mark.textContent = text.slice(idx, idx + needle.length);
+            textElement.append(mark);
+            pos = idx + needle.length;
+        }
+        textElement.append(text.slice(pos));
     }
     
     // --- Live Update Functions ---
@@ -109,19 +121,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     function batchProcessUpdates() {
-        if (pendingUpdates.length === 0) return;
-        
-        // Process all pending updates
-        pendingUpdates.forEach(update => {
-            if (update.type === 'new') {
-                appendNewCaption(update.caption);
-            } else if (update.type === 'update') {
-                updateExistingCaption(update.caption);
-            }
-        });
-        
-        pendingUpdates = [];
-        updateTimer = null;
+        // The queue state must reset even if a render throws, or queueUpdate would
+        // see a stale updateTimer forever and no caption would ever render again.
+        try {
+            pendingUpdates.forEach(update => {
+                try {
+                    if (update.type === 'new') {
+                        appendNewCaption(update.caption);
+                    } else if (update.type === 'update') {
+                        updateExistingCaption(update.caption);
+                    }
+                } catch (error) {
+                    console.error('[Viewer] Failed to render caption update:', error);
+                }
+            });
+        } finally {
+            pendingUpdates = [];
+            updateTimer = null;
+        }
     }
     
     function queueUpdate(update) {
@@ -135,7 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     function updateAnalyticsIncremental(caption) {
         // Check if this is a new speaker we haven't seen before
-        const speakerButton = speakerFiltersContainer.querySelector(`button[data-speaker="${caption.Name}"]`);
+        const speakerButton = speakerFiltersContainer.querySelector(`button[data-speaker="${CSS.escape(caption.Name)}"]`);
         if (!speakerButton) {
             // New speaker detected, add their button
             const btn = document.createElement('button');
@@ -394,8 +411,9 @@ document.addEventListener('DOMContentLoaded', () => {
             showNotification(`Saved ${visibleCaptions.length} caption(s) to ${filename}`, 'success');
             
             // Update meeting ended message to show it's been saved
-            if (document.getElementById('meeting-ended-message')) {
-                await addMeetingEndedMessage(true);
+            const endedSubtext = document.querySelector('#meeting-ended-message span');
+            if (endedSubtext) {
+                endedSubtext.textContent = 'The transcript has been saved.';
             }
         } catch (err) {
             console.error('Failed to save transcript: ', err);
@@ -505,61 +523,57 @@ document.addEventListener('DOMContentLoaded', () => {
     
     async function loadSessionHistory() {
         try {
-            // Check if SessionManager already exists or load it
-            if (typeof SessionManager === 'undefined') {
-                const script = document.createElement('script');
-                script.src = chrome.runtime.getURL('sessionManager.js');
-                document.head.appendChild(script);
-                
-                await new Promise(resolve => {
-                    script.onload = resolve;
-                    setTimeout(resolve, 200);
-                });
-            }
-            
-            const sessionManager = new SessionManager();
-            const sessions = await sessionManager.getSessionIndex();
-            
+            const sessions = await captionsDB.getMeetingIndex();
+
             if (!sessions || sessions.length === 0) {
                 sessionListModal.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">No saved sessions available</div>';
                 return;
             }
-            
+
             let html = '';
             for (const session of sessions) {
-                const timeAgo = getTimeAgo(new Date(session.timestamp));
+                const startedAt = new Date(session.startedAt);
+                const timeAgo = getTimeAgo(startedAt);
+                const badge = session.status === 'recovered'
+                    ? ' <span style="font-size: 10px; background-color: #ffc107; color: #664d03; padding: 1px 6px; border-radius: 8px;">Recovered</span>'
+                    : '';
                 html += `
-                    <div class="session-item" onclick="loadSessionFromHistory('${session.id}')">
-                        <div class="session-title">${escapeHtml(session.title)}</div>
+                    <div class="session-item" data-id="${escapeHtml(session.id)}">
+                        <div class="session-title">${escapeHtml(session.title)}${badge}</div>
                         <div class="session-meta">
-                            ${session.date} • ${session.duration} • ${session.captionCount} captions • ${timeAgo}
+                            ${startedAt.toLocaleDateString()} • ${session.duration} • ${session.captionCount} captions • ${timeAgo}
                         </div>
                     </div>
                 `;
             }
-            
+
             sessionListModal.innerHTML = html;
-            
+
+            // MV3 CSP forbids inline onclick handlers - attach real listeners
+            sessionListModal.querySelectorAll('.session-item').forEach(item => {
+                item.addEventListener('click', () => loadSessionFromHistory(item.dataset.id));
+            });
+
         } catch (error) {
             console.error('[Session History] Failed to load:', error);
             sessionListModal.innerHTML = '<div style="text-align: center; color: #dc3545; padding: 20px;">Error loading sessions</div>';
         }
     }
-    
+
     window.loadSessionFromHistory = async function(sessionId) {
         try {
-            const sessionManager = new SessionManager();
-            const sessionData = await sessionManager.loadSession(sessionId);
-            
+            const { meta, transcript } = await captionsDB.getMeeting(sessionId);
+
             // Close modal
             sessionModal.style.display = 'none';
-            
+
             // Load the transcript
-            allCaptions = sessionData.transcript;
+            allCaptions = transcript;
             isLiveStreaming = false; // Historical data, not live
-            
+
             // Update title
-            document.querySelector('h1').innerHTML = `${escapeHtml(sessionData.metadata.title)} <span style="font-size: 0.5em; color: #666;">(Historical)</span>`;
+            const suffix = meta.status === 'recovered' ? '(Recovered)' : '(Historical)';
+            document.querySelector('h1').innerHTML = `${escapeHtml(meta.title)} <span style="font-size: 0.5em; color: #666;">${suffix}</span>`;
             
             // Calculate and display analytics
             const analytics = calculateAnalytics(allCaptions);
@@ -605,19 +619,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function initialize() {
         try {
-            // Check if we have captions passed via storage (from popup)
-            const result = await chrome.storage.local.get(['captionsToView', 'viewerData']);
-            let transcript = result.captionsToView;
-            let viewerData = result.viewerData;
-            
-            // Use viewerData if captionsToView is not available
-            if (!transcript && viewerData && viewerData.transcriptArray) {
-                transcript = viewerData.transcriptArray;
-                // Update title if it's historical data
-                if (viewerData.isHistorical && viewerData.meetingTitle) {
-                    document.querySelector('h1').innerHTML = `${escapeHtml(viewerData.meetingTitle)} <span style="font-size: 0.5em; color: #666;">(Historical)</span>`;
+            // Historical meeting opened via viewer.html?meetingId=<id> (popup history,
+            // recovery banner): read it straight from IndexedDB, no live streaming.
+            const meetingId = new URLSearchParams(window.location.search).get('meetingId');
+            if (meetingId) {
+                const { meta, transcript } = await captionsDB.getMeeting(meetingId);
+                allCaptions = transcript;
+                isLiveStreaming = false;
+
+                const suffix = meta.status === 'recovered' ? '(Recovered)' : '(Historical)';
+                document.querySelector('h1').innerHTML = `${escapeHtml(meta.title)} <span style="font-size: 0.5em; color: #666;">${suffix}</span>`;
+
+                const analytics = calculateAnalytics(transcript);
+                if (analytics) {
+                    displayAnalytics(analytics);
                 }
+                renderCaptions(transcript);
+                populateSpeakerFilters(transcript);
+                setupEventListeners();
+                return;
             }
+
+            // Check if we have captions passed via storage (from the service worker's
+            // "View Transcript" flow - the only remaining writer of this key)
+            const result = await chrome.storage.local.get('captionsToView');
+            const transcript = result.captionsToView;
+            // Consume the handoff key now that it's read; the ?meetingId= path above
+            // returns before this and must not clobber a racing handoff.
+            chrome.storage.local.remove('captionsToView');
 
             if (transcript && transcript.length > 0) {
                 // Calculate and display analytics
@@ -654,9 +683,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error("Error loading captions:", error);
             captionsContainer.innerHTML = '<p class="status-message">Unable to load captions. Please try opening the extension popup again.</p>';
-        } finally {
-            // Clean up storage to prevent re-displaying on next open
-            chrome.storage.local.remove(['captionsToView', 'viewerData']);
         }
     }
     
@@ -734,10 +760,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 // Remove "Meeting Ended" message if we're receiving updates again
                 removeMeetingEndedMessage();
-            } else if (request.message === "live_attendee_update") {
-                // Handle attendee updates if needed
-                console.log("Attendee update:", request);
-                lastUpdateTime = Date.now(); // Update timestamp for attendee updates too
             } else if (request.message === "meeting_ended") {
                 // Handle explicit meeting end signal
                 isLiveStreaming = false;
@@ -783,11 +805,12 @@ document.addEventListener('DOMContentLoaded', () => {
             // Add "Meeting Ended" message
             await addMeetingEndedMessage();
             
-            // Try to reconnect
-            const tabs = await chrome.tabs.query({ 
+            // Try to reconnect (same host list as the initial connect)
+            const tabs = await chrome.tabs.query({
                 url: [
                     "https://teams.microsoft.com/*",
-                    "https://teams.cloud.microsoft/*"
+                    "https://teams.cloud.microsoft/*",
+                    "https://teams.live.com/*"
                 ]
             });
             if (tabs.length > 0) {

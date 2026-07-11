@@ -4,8 +4,13 @@
 // 1. In a Microsoft Teams meeting in your browser (Chrome, Edge, Firefox).
 // 2. Open the Developer Tools (press F12 or Ctrl+Shift+I).
 // 3. Go to the "Console" tab.
-// 4. (Optional) To try the auto-enable feature, change the line below to `true`.
+// 4. (Optional) To have the script click through Teams menus and turn captions on
+//    for you, change AUTO_ENABLE_CAPTIONS_EXPERIMENTAL below to `true`.
 // 5. Copy this entire script and paste it into the console, then press Enter.
+//
+// LIMITATION: the transcript lives only in this page's memory. Refreshing or
+// closing the tab loses everything - save before you leave. (The browser
+// extension version survives crashes; this console script does not.)
 //
 // NEW FEATURES v2.0:
 // - Attendee tracking with join/leave times
@@ -14,7 +19,7 @@
 //
 (() => {
     // --- CONFIGURATION ---
-    const AUTO_ENABLE_CAPTIONS_EXPERIMENTAL = true; // Change to `false` to disable
+    const AUTO_ENABLE_CAPTIONS_EXPERIMENTAL = false; // Change to `true` to enable
 
     // --- PREVENT DUPLICATE EXECUTION ---
     if (document.getElementById('teams-caption-saver-ui')) {
@@ -45,7 +50,7 @@
     const SELECTORS = {
         // Updated to match the extension's selectors
         CAPTIONS_RENDERER: "[data-tid='closed-caption-v2-window-wrapper'], [data-tid='closed-captions-renderer'], [data-tid*='closed-caption']",
-        CHAT_MESSAGE: '.fui-ChatMessageCompact, .fui-ChatMessageContent__root',
+        CHAT_MESSAGE: '.fui-ChatMessageCompact',
         AUTHOR: '[data-tid="author"]',
         CAPTION_TEXT: '[data-tid="closed-caption-text"]',
         LEAVE_BUTTONS: [
@@ -61,51 +66,59 @@
         MORE_BUTTON_EXPANDED: "button[data-tid='more-button'][aria-expanded='true'], button[id='callingButtons-showMoreBtn'][aria-expanded='true']",
         LANGUAGE_SPEECH_BUTTON: "div[id='LanguageSpeechMenuControl-id']",
         TURN_ON_CAPTIONS_BUTTON: "div[id='closed-captions-button']",
-        CAPTIONS_BUTTON: "button[id='captions-button'], button[data-tid='cc-toggle-button']",
         ROSTER_BUTTON: "button[data-tid='calling-toolbar-people-button'], button[id='roster-button']",
         AVATAR_LIST: '.fui-AvatarList',
         MEETING_HEADING: 'span.heading-18',
         ROSTER_PANEL: '[role="tabpanel"][aria-label*="Roster"]',
         ATTENDEE_TREE: "[role='tree'][aria-label='Attendees']",
-        ATTENDEE_ITEM: "[data-tid^='participantsInCall-']"
+        ATTENDEE_ITEM: "[data-tid^='participantsInCall-']",
+        ATTENDEE_NAME: "[id^='roster-avatar-img-']"
     };
 
     // --- ATTENDEE TRACKING ---
     function trackAttendees() {
-        const avatarLists = document.querySelectorAll(SELECTORS.AVATAR_LIST);
         const currentAttendees = new Set();
-        
-        avatarLists.forEach(list => {
-            const heading = list.closest('div')?.querySelector(SELECTORS.MEETING_HEADING);
-            if (heading && heading.textContent.includes('In this meeting')) {
-                const avatars = list.querySelectorAll('li[role="listitem"]');
-                avatars.forEach(avatar => {
-                    const nameEl = avatar.querySelector('[class*="fui-Tooltip"]');
-                    if (nameEl) {
-                        const name = nameEl.getAttribute('aria-label') || nameEl.textContent;
-                        if (name && name.trim()) {
-                            const cleanName = name.trim();
-                            currentAttendees.add(cleanName);
-                            
-                            if (!attendeesList.has(cleanName)) {
-                                attendeesList.set(cleanName, {
-                                    name: cleanName,
-                                    joinTime: new Date().toLocaleTimeString(),
-                                    leaveTime: null
-                                });
-                                attendeesHistory.push({
-                                    type: 'join',
-                                    name: cleanName,
-                                    time: new Date().toLocaleTimeString()
-                                });
-                                console.log(`Attendee joined: ${cleanName}`);
-                            }
-                        }
-                    }
+
+        // Preferred: the roster tree items (same selectors as the extension,
+        // locale-independent)
+        document.querySelectorAll(SELECTORS.ATTENDEE_ITEM).forEach(item => {
+            const name = item.querySelector(SELECTORS.ATTENDEE_NAME)?.textContent?.trim();
+            if (name) currentAttendees.add(name);
+        });
+
+        // Fallback: avatar-list heuristic (older layouts; English UI only)
+        if (currentAttendees.size === 0) {
+            document.querySelectorAll(SELECTORS.AVATAR_LIST).forEach(list => {
+                const heading = list.closest('div')?.querySelector(SELECTORS.MEETING_HEADING);
+                if (heading && heading.textContent.includes('In this meeting')) {
+                    list.querySelectorAll('li[role="listitem"]').forEach(avatar => {
+                        const nameEl = avatar.querySelector('[class*="fui-Tooltip"]');
+                        const name = (nameEl?.getAttribute('aria-label') || nameEl?.textContent || '').trim();
+                        if (name) currentAttendees.add(name);
+                    });
+                }
+            });
+        }
+
+        // Roster not visible (panel closed): don't mark everyone as having left
+        if (currentAttendees.size === 0) return;
+
+        currentAttendees.forEach(cleanName => {
+            if (!attendeesList.has(cleanName)) {
+                attendeesList.set(cleanName, {
+                    name: cleanName,
+                    joinTime: new Date().toLocaleTimeString(),
+                    leaveTime: null
                 });
+                attendeesHistory.push({
+                    type: 'join',
+                    name: cleanName,
+                    time: new Date().toLocaleTimeString()
+                });
+                console.log(`Attendee joined: ${cleanName}`);
             }
         });
-        
+
         // Check for attendees who left
         attendeesList.forEach((data, name) => {
             if (!currentAttendees.has(name) && !data.leaveTime) {
@@ -120,20 +133,23 @@
         });
     }
 
+    let attendeeObservedElement = null;
+
     function startAttendeeTracking() {
-        const rosterContainer = document.querySelector('[role="tabpanel"][aria-label*="Roster"]');
-        if (rosterContainer && !attendeeObserver) {
-            attendeeObserver = new MutationObserver(() => {
-                trackAttendees();
-            });
-            attendeeObserver.observe(rosterContainer, { 
-                childList: true, 
-                subtree: true,
-                attributes: true,
-                attributeFilter: ['aria-label']
-            });
-            trackAttendees(); // Initial scan
-        }
+        if (attendeeObserver) return;
+        const rosterContainer = document.querySelector(SELECTORS.ATTENDEE_TREE)
+            || document.querySelector(SELECTORS.ROSTER_PANEL);
+        if (!rosterContainer) return; // roster not open yet - the main loop retries
+
+        attendeeObserver = new MutationObserver(trackAttendees);
+        attendeeObserver.observe(rosterContainer, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['aria-label']
+        });
+        attendeeObservedElement = rosterContainer;
+        trackAttendees(); // Initial scan
     }
 
     function stopAttendeeTracking() {
@@ -141,6 +157,7 @@
             attendeeObserver.disconnect();
             attendeeObserver = null;
         }
+        attendeeObservedElement = null;
     }
 
     // --- SPEAKER ALIASING ---
@@ -625,6 +642,7 @@
                 .tcs-alias-save:hover { background-color: #218838; }
             `
         });
+        style.id = 'tcs-styles';
         document.head.appendChild(style);
 
         // Close dropdowns when clicking elsewhere
@@ -846,12 +864,18 @@
                 content = JSON.stringify(jsonData, null, 2);
                 break;
             case 'yaml':
+                // Double-quote all values so captions containing :, #, quotes or
+                // newlines still produce valid YAML
+                const yamlEscape = (value) => `"${String(value)
+                    .replace(/\\/g, '\\\\')
+                    .replace(/"/g, '\\"')
+                    .replace(/\n/g, '\\n')}"`;
                 const yamlAttendees = attendeesList.size > 0 ?
-                    `attendees:\n${Array.from(attendeesList.values()).map(a => 
-                        `  - name: ${a.name}\n    joinTime: ${a.joinTime}${a.leaveTime ? `\n    leaveTime: ${a.leaveTime}` : ''}`
+                    `attendees:\n${Array.from(attendeesList.values()).map(a =>
+                        `  - name: ${yamlEscape(a.name)}\n    joinTime: ${yamlEscape(a.joinTime)}${a.leaveTime ? `\n    leaveTime: ${yamlEscape(a.leaveTime)}` : ''}`
                     ).join('\n')}\n\n` : '';
-                const yamlTranscript = cleanTranscript.map(e => 
-                    `-\n  Name: ${e.Name}\n  Text: ${e.Text}\n  Time: ${e.Time}`
+                const yamlTranscript = cleanTranscript.map(e =>
+                    `-\n  Name: ${yamlEscape(e.Name)}\n  Text: ${yamlEscape(e.Text)}\n  Time: ${yamlEscape(e.Time)}`
                 ).join('\n');
                 content = yamlAttendees + 'transcript:\n' + yamlTranscript;
                 break;
@@ -956,6 +980,15 @@
                     await attemptAutoEnableCaptions();
                 }
             }
+            // Attendee tracking retries here: the one-shot attempt in
+            // startCaptureSession fails if the roster panel isn't open yet, and the
+            // observed panel disappears from the DOM whenever the user closes it.
+            if (attendeeObservedElement && !document.contains(attendeeObservedElement)) {
+                stopAttendeeTracking();
+            }
+            if (capturing && !attendeeObserver) {
+                startAttendeeTracking();
+            }
         } else {
             stopCaptureSession();
             hasAttemptedAutoEnable = false;
@@ -972,8 +1005,7 @@
         
         const ui = document.getElementById('teams-caption-saver-ui');
         if (ui) ui.remove();
-        const style = document.head.querySelector('style');
-        if (style && style.textContent.includes('.tcs-split-button')) style.remove();
+        document.getElementById('tcs-styles')?.remove();
         console.log("Teams Caption Saver has been shut down and cleaned up.");
     }
 

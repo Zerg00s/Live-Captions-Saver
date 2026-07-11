@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MS Teams Live Captions Saver",
-  "version": "4.8.1",
+  "version": "4.9.0",
   "description": "Capture and save live captions from Microsoft Teams meetings on the web.",
   "homepage_url": "https://spdenis.com",
   "icons": {
@@ -45,21 +45,6 @@
       ],
       "js": [
         "content_script.js"
-      ]
-    }
-  ],
-  
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "viewer.html",
-        "viewer.js",
-        "sessionManager.js"
-      ],
-      "matches": [
-        "https://teams.microsoft.com/*",
-        "https://teams.cloud.microsoft/*",
-        "https://teams.live.com/*"
       ]
     }
   ]

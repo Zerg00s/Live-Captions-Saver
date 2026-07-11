@@ -1,10 +1,7 @@
 // --- Constants ---
 const TIMING = {
     BUTTON_CLICK_DELAY: 400,
-    RETRY_DELAY: 2000,
-    MAIN_LOOP_INTERVAL: 5000,
     OBSERVER_CHECK_INTERVAL: 10000,
-    TOOLTIP_DISPLAY_DURATION: 1500,
     ATTENDEE_UPDATE_INTERVAL: 60000, // Check attendees every minute
     INITIAL_ATTENDEE_DELAY: 1500, // Wait 1.5s after meeting start before first check
 };
@@ -31,8 +28,6 @@ const SELECTORS = {
     ATTENDEE_COUNT: "#roster-title-section-2",
     ATTENDEE_NAME: "[id^='roster-avatar-img-']",
     ATTENDEE_ROLE: "[data-tid='ts-roster-organizer-status']",
-    MEETING_CHAT: "#chat-pane-list",
-    CHAT_CONTROL_MESSAGE: ".fui-ChatControlMessage",
     PEOPLE_BUTTON: "button[data-tid='calling-toolbar-people-button'], button[id='roster-button']",
 };
 
@@ -53,6 +48,10 @@ let autoEnableLastAttempt = 0;
 let autoEnableDebounceTimer = null;
 let autoSaveTriggered = false;
 let lastMeetingId = null;
+let currentMeetingId = null;  // id of this meeting's record in IndexedDB (via service worker)
+let lastFlushedCount = 0;     // caption count at the last flush, for growth-triggered flushes
+let pendingResume = null;     // {id, normTitle, endedAt, silent} - last session ended in this page
+const RESUME_WINDOW_MS = 10 * 60 * 1000; // how recent a previous session must be to offer a merge
 
 // --- Attendee Tracking State ---
 let attendeeUpdateInterval = null;
@@ -70,19 +69,6 @@ function broadcastCaptionUpdate(data) {
     try {
         chrome.runtime.sendMessage({
             message: "live_caption_update",
-            ...data
-        }).catch(() => {
-            // Viewer might not be open, ignore error
-        });
-    } catch (error) {
-        // Silent fail if no listeners
-    }
-}
-
-function broadcastAttendeeUpdate(data) {
-    try {
-        chrome.runtime.sendMessage({
-            message: "live_attendee_update",
             ...data
         }).catch(() => {
             // Viewer might not be open, ignore error
@@ -126,32 +112,6 @@ class ErrorHandler {
                 return fallback;
             }
         };
-    }
-}
-
-// --- Retry Mechanism ---
-class RetryHandler {
-    static async withRetry(fn, context = '', maxAttempts = 3, baseDelay = 1000) {
-        let lastError;
-        
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                return await fn();
-            } catch (error) {
-                lastError = error;
-                
-                if (attempt === maxAttempts) {
-                    ErrorHandler.log(error, `${context} - Final attempt failed`, false);
-                    throw error;
-                }
-                
-                const delayTime = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
-                console.log(`[Teams Caption Saver] ${context} - Attempt ${attempt} failed, retrying in ${delayTime}ms:`, error.message || error);
-                await delay(delayTime);
-            }
-        }
-        
-        throw lastError;
     }
 }
 
@@ -229,6 +189,10 @@ const processCaptionUpdates = ErrorHandler.wrap(function() {
                     type: 'new',
                     caption: newCaption
                 });
+                // Flush early if the transcript grew a lot since the last flush
+                if (transcriptArray.length - lastFlushedCount >= 25) {
+                    flushMeetingSnapshot();
+                }
             }
         } catch (error) {
             ErrorHandler.log(error, 'Processing individual caption element', true);
@@ -487,11 +451,12 @@ const handleMeetingStateChange = ErrorHandler.wrap(async function() {
             // Silent fail if no listeners
         }
         
-        // Generate a unique meeting session ID
-        const currentMeetingId = `${meetingTitleOnStart}_${recordingStartTime?.toISOString() || Date.now()}`;
-        
+        // Generate a unique meeting session ID (dedup key for auto-save, distinct
+        // from the module-level currentMeetingId used for IndexedDB records)
+        const autoSaveSessionKey = `${meetingTitleOnStart}_${recordingStartTime?.toISOString() || Date.now()}`;
+
         // Prevent duplicate auto-saves for the same meeting session
-        if (autoSaveTriggered && lastMeetingId === currentMeetingId) {
+        if (autoSaveTriggered && lastMeetingId === autoSaveSessionKey) {
             console.log("Auto-save already triggered for this meeting session, skipping...");
             clearElementCache();
             wasInMeeting = nowInMeeting;
@@ -505,7 +470,7 @@ const handleMeetingStateChange = ErrorHandler.wrap(async function() {
                 
                 // Mark auto-save as triggered before sending message
                 autoSaveTriggered = true;
-                lastMeetingId = currentMeetingId;
+                lastMeetingId = autoSaveSessionKey;
                 
                 // Send save message without retry (let service worker handle retries if needed)
                 const attendeeReport = await getAttendeeReport();
@@ -528,13 +493,14 @@ const handleMeetingStateChange = ErrorHandler.wrap(async function() {
         clearElementCache();
     }
     
+    const justJoined = !wasInMeeting && nowInMeeting;
     wasInMeeting = nowInMeeting;
-    
+
     if (!nowInMeeting) {
         stopCaptureSession();
         stopAttendeeTracking();
         return;
-    } else if (!wasInMeeting && nowInMeeting) {
+    } else if (justJoined) {
         // Reset auto-save state when joining a new meeting
         console.log("Meeting transition detected: Out -> In. Resetting auto-save state.");
         autoSaveTriggered = false;
@@ -609,12 +575,15 @@ async function startCaptureSession() {
 
     console.log("New caption session detected. Starting capture.");
     transcriptArray.length = 0;
-    chrome.storage.session.remove('speakerAliases');
+    // Note: speakerAliases is cleared by the service worker on update_badge_status
+    // (capturing: true) - content scripts cannot access chrome.storage.session.
 
     capturing = true;
     meetingTitleOnStart = document.title;
     recordingStartTime = new Date();
-    
+    currentMeetingId = `meeting_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    lastFlushedCount = 0;
+
     console.log(`Capture started. Title: "${meetingTitleOnStart}", Time: ${recordingStartTime.toLocaleString()}`);
     
     // Start periodic backup
@@ -624,8 +593,170 @@ async function startCaptureSession() {
     startAttendeeTracking();
     
     chrome.runtime.sendMessage({ message: "update_badge_status", capturing: true });
-    
+
     ensureObserverIsActive();
+
+    // Offer to continue a recent transcript of the same meeting (leave & rejoin)
+    maybeOfferResume();
+}
+
+// Comparable meeting identity from a document.title. Must stay in sync with the
+// copy in service_worker.js.
+function normalizeMeetingTitle(fullTitle) {
+    if (!fullTitle) return 'meeting';
+    const parts = fullTitle.split('|');
+    const meetingName = parts.length > 2 ? parts[1] : parts[0];
+    const cleanedName = meetingName.replace('Microsoft Teams', '').trim();
+    return (cleanedName.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_') || 'Meeting')
+        .replace(/^\(\d+\)\s*/, '').trim().toLowerCase();
+}
+
+async function maybeOfferResume() {
+    const normTitle = normalizeMeetingTitle(meetingTitleOnStart);
+
+    // Silent fast-path: capture restarted in this same page without leaving the
+    // meeting (captions toggled off/on) - unquestionably the same meeting, merge.
+    if (pendingResume && pendingResume.silent && pendingResume.normTitle === normTitle &&
+        Date.now() - pendingResume.endedAt < RESUME_WINDOW_MS) {
+        const resumeId = pendingResume.id;
+        pendingResume = null;
+        console.log('[Teams Caption Saver] Captions re-enabled in the same meeting; continuing transcript.');
+        await adoptPreviousMeeting(resumeId);
+        return;
+    }
+    pendingResume = null;
+
+    // Rejoin after leaving (or after a tab reload): ask the service worker for a
+    // recent same-title meeting, then let the user decide.
+    try {
+        const response = await chrome.runtime.sendMessage({
+            message: 'get_resumable_meeting',
+            meetingTitle: meetingTitleOnStart,
+            excludeId: currentMeetingId
+        });
+        if (response?.candidate && capturing) {
+            showResumeToast(response.candidate);
+        }
+    } catch (error) {
+        // Service worker unavailable; just keep the new transcript
+    }
+}
+
+// Continue a previous meeting record: prepend its transcript to the in-memory
+// array, adopt its id and start time, and drop the interim record created since.
+async function adoptPreviousMeeting(previousId) {
+    try {
+        const response = await chrome.runtime.sendMessage({
+            message: 'get_meeting_transcript',
+            meetingId: previousId
+        });
+        if (!response?.transcript || !capturing) return;
+
+        const interimId = currentMeetingId;
+        const restored = response.transcript.map((caption, i) => ({
+            ...caption,
+            key: `restored_${previousId}_${i}`
+        }));
+        transcriptArray.unshift(...restored);
+        currentMeetingId = previousId;
+        if (response.startedAt) {
+            recordingStartTime = new Date(response.startedAt);
+        }
+        lastFlushedCount = 0;
+
+        if (interimId && interimId !== previousId) {
+            chrome.runtime.sendMessage({ message: 'delete_meeting', meetingId: interimId }).catch(() => {});
+        }
+        await flushMeetingSnapshot();
+        console.log(`[Teams Caption Saver] Continued previous transcript (${restored.length} restored captions).`);
+    } catch (error) {
+        ErrorHandler.log(error, 'Adopting previous meeting transcript', true);
+    }
+}
+
+function showResumeToast(candidate) {
+    // Only one toast at a time
+    document.getElementById('tcs-resume-toast')?.remove();
+
+    const toast = document.createElement('div');
+    toast.id = 'tcs-resume-toast';
+    toast.style.cssText = 'position:fixed; bottom:24px; right:24px; z-index:2147483647;' +
+        'background:#292929; color:#fff; padding:12px 16px; border-radius:8px;' +
+        'box-shadow:0 4px 16px rgba(0,0,0,0.4); font-family:"Segoe UI",sans-serif; font-size:13px;' +
+        'max-width:320px;';
+
+    const text = document.createElement('div');
+    text.textContent = 'Looks like the same meeting. Continue previous transcript?';
+    text.style.cssText = 'margin-bottom:10px;';
+
+    const buttonRow = document.createElement('div');
+    buttonRow.style.cssText = 'display:flex; gap:8px;';
+
+    const continueBtn = document.createElement('button');
+    continueBtn.textContent = `Continue (${candidate.captionCount} captions)`;
+    continueBtn.style.cssText = 'flex-grow:1; padding:5px 10px; border:none; border-radius:4px;' +
+        'background:#6264a7; color:#fff; cursor:pointer; font-size:12px;';
+
+    const newBtn = document.createElement('button');
+    newBtn.textContent = 'Start new';
+    newBtn.style.cssText = 'padding:5px 10px; border:1px solid #666; border-radius:4px;' +
+        'background:transparent; color:#fff; cursor:pointer; font-size:12px;';
+
+    const dismissTimer = setTimeout(() => toast.remove(), 30000);
+    continueBtn.addEventListener('click', () => {
+        clearTimeout(dismissTimer);
+        toast.remove();
+        adoptPreviousMeeting(candidate.id);
+    });
+    newBtn.addEventListener('click', () => {
+        clearTimeout(dismissTimer);
+        toast.remove();
+    });
+
+    buttonRow.append(continueBtn, newBtn);
+    toast.append(text, buttonRow);
+    document.body.appendChild(toast);
+}
+
+// Send the current transcript snapshot to the service worker, which persists it
+// to IndexedDB with status 'live'. A crash loses at most one flush window.
+async function flushMeetingSnapshot() {
+    if (!capturing || !currentMeetingId || transcriptArray.length === 0) return;
+    lastFlushedCount = transcriptArray.length;
+    // Snapshot mutable state before any await: stopCaptureSession may run while we
+    // wait, and a late flush with a nulled id (or after finalize) would corrupt the
+    // record or resurrect a completed meeting as 'live'.
+    const meetingId = currentMeetingId;
+    const meetingTitle = meetingTitleOnStart;
+    const startedAt = recordingStartTime ? recordingStartTime.toISOString() : null;
+    const transcript = getCleanTranscript();
+    try {
+        const attendeeReport = await getAttendeeReport();
+        if (currentMeetingId !== meetingId) return; // meeting ended while we awaited
+        await chrome.runtime.sendMessage({
+            message: 'flush_meeting',
+            meetingId: meetingId,
+            meetingTitle: meetingTitle,
+            recordingStartTime: startedAt,
+            transcriptArray: transcript,
+            attendeeReport: attendeeReport
+        });
+    } catch (error) {
+        if (String(error?.message).includes('Extension context invalidated')) {
+            // The extension was reloaded/updated, orphaning this content script: it can
+            // never reach the service worker again. Stop flushing quietly - after the
+            // Teams tab reloads, the new content script takes over, and this meeting's
+            // stale 'live' record gets promoted to 'recovered'.
+            if (backupInterval) {
+                clearInterval(backupInterval);
+                backupInterval = null;
+            }
+            currentMeetingId = null;
+            console.log("[Teams Caption Saver] Extension was reloaded; refresh this tab to resume capture.");
+            return;
+        }
+        console.warn("[Teams Caption Saver] Flush failed:", error);
+    }
 }
 
 function startPeriodicBackup() {
@@ -633,26 +764,9 @@ function startPeriodicBackup() {
     if (backupInterval) {
         clearInterval(backupInterval);
     }
-    
-    // Backup transcript every 30 seconds
-    backupInterval = setInterval(async () => {
-        if (transcriptArray.length > 0) {
-            try {
-                await chrome.storage.local.set({
-                    transcriptBackup: {
-                        transcript: transcriptArray,
-                        meetingTitle: meetingTitleOnStart,
-                        recordingStartTime: recordingStartTime ? recordingStartTime.toISOString() : null,
-                        lastBackup: new Date().toISOString(),
-                        attendeeData: attendeeData
-                    }
-                });
-                console.log(`[Teams Caption Saver] Backup saved: ${transcriptArray.length} entries`);
-            } catch (error) {
-                console.error("[Teams Caption Saver] Backup failed:", error);
-            }
-        }
-    }, 30000); // 30 seconds
+
+    // Flush transcript to IndexedDB (via service worker) every 15 seconds
+    backupInterval = setInterval(flushMeetingSnapshot, 15000);
 }
 
 function stopCaptureSession() {
@@ -672,21 +786,19 @@ function stopCaptureSession() {
         backupInterval = null;
     }
     
-    // Final backup before stopping
+    // Save to session history when meeting ends (even if < 5 minutes)
     if (transcriptArray.length > 0) {
-        chrome.storage.local.set({
-            transcriptBackup: {
-                transcript: transcriptArray,
-                meetingTitle: meetingTitleOnStart,
-                recordingStartTime: recordingStartTime ? recordingStartTime.toISOString() : null,
-                lastBackup: new Date().toISOString(),
-                attendeeData: attendeeData
-            }
-        });
-        
-        // Save to session history when meeting ends (even if < 5 minutes)
+        // Remember this session so a quick restart can offer (or silently do) a merge.
+        // silent=true means the user never left the meeting - captions just toggled off.
+        pendingResume = {
+            id: currentMeetingId,
+            normTitle: normalizeMeetingTitle(meetingTitleOnStart),
+            endedAt: Date.now(),
+            silent: isUserInMeeting()
+        };
         saveToSessionHistory();
     }
+    currentMeetingId = null;
     
     // Stop attendee tracking
     stopAttendeeTracking();
@@ -697,14 +809,18 @@ function stopCaptureSession() {
 // Save current transcript to session history
 async function saveToSessionHistory() {
     if (transcriptArray.length === 0) return;
-    
+    // Capture before any await: the caller may reset currentMeetingId right after this call
+    const meetingId = currentMeetingId;
+
     try {
         // Use message passing to save session (content scripts can't import modules)
         const attendeeReport = await getAttendeeReport();
         await chrome.runtime.sendMessage({
             message: "save_session_history",
-            transcriptArray: transcriptArray,
+            meetingId: meetingId,
+            transcriptArray: getCleanTranscript(),
             meetingTitle: meetingTitleOnStart || 'Untitled Meeting',
+            recordingStartTime: recordingStartTime ? recordingStartTime.toISOString() : null,
             attendeeReport: attendeeReport
         });
         
@@ -857,8 +973,33 @@ function cleanupObservers() {
     clearElementCache();
 }
 
+// Last-gasp flush: fires synchronously (no awaits before sendMessage) so the
+// snapshot still reaches the service worker while the page is being torn down.
+function lastGaspFlush() {
+    if (!capturing || !currentMeetingId || transcriptArray.length === 0) return;
+    lastFlushedCount = transcriptArray.length;
+    try {
+        chrome.runtime.sendMessage({
+            message: 'flush_meeting',
+            meetingId: currentMeetingId,
+            meetingTitle: meetingTitleOnStart,
+            recordingStartTime: recordingStartTime ? recordingStartTime.toISOString() : null,
+            transcriptArray: getCleanTranscript(),
+            attendeeReport: null
+        }).catch(() => {});
+    } catch (error) {
+        // Extension context may already be gone; nothing to do
+    }
+}
+
 // Cleanup on page unload
 window.addEventListener('beforeunload', cleanupObservers);
+window.addEventListener('pagehide', lastGaspFlush);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+        lastGaspFlush();
+    }
+});
 
 // Initialize the system
 initializeEventDrivenSystem();
@@ -942,7 +1083,10 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
             break;
     }
 
-    return true; // Indicates an asynchronous response may be sent.
+    // Cases that respond asynchronously return true themselves; everything else has
+    // already responded (or never will), so close the channel - a dangling `true`
+    // makes awaiting senders reject with "message channel closed".
+    return false;
 });
 
 console.log("Teams Captions Saver content script is running.");

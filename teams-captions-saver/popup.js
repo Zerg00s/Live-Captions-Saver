@@ -46,21 +46,16 @@ const MEETING_TYPE_PROMPTS = {
 
 let currentDefaultFormat = 'txt';
 
-// --- Error Handling ---
-function safeExecute(fn, context = '', fallback = null) {
-    try {
-        return fn();
-    } catch (error) {
-        console.error(`[Teams Caption Saver] ${context}:`, error);
-        return fallback;
-    }
-}
-
 // --- Utility Functions ---
+// Escapes quotes too: output is interpolated into double-quoted HTML attributes
+// (alias inputs, data-* values), where the DOM textContent trick isn't enough.
 function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 }
 
 async function getActiveTeamsTab() {
@@ -517,63 +512,89 @@ async function handleSave(target) {
 // --- Session History Management ---
 async function initializeSessionHistory() {
     try {
-        // Load SessionManager script
-        const script = document.createElement('script');
-        script.src = 'sessionManager.js';
-        document.head.appendChild(script);
-        
-        // Wait for script to load
-        await new Promise(resolve => {
-            script.onload = resolve;
-            setTimeout(resolve, 100); // Fallback timeout
-        });
-        
         // Always show session history button
         UI_ELEMENTS.sessionHistory.style.display = 'flex';
-        
+
         // Setup history button click handler
         UI_ELEMENTS.historyButton.addEventListener('click', async () => {
             const isVisible = UI_ELEMENTS.sessionList.style.display !== 'none';
             UI_ELEMENTS.sessionList.style.display = isVisible ? 'none' : 'block';
-            
+
             if (!isVisible) {
                 await loadSessionList();
             }
         });
-        
-        // Check if we have saved sessions and update button text
-        const sessionManager = new SessionManager();
-        const sessions = await sessionManager.getSessionIndex();
-        
-        if (sessions && sessions.length > 0) {
-            UI_ELEMENTS.historyButton.innerHTML = `📁 View Previous Sessions (${sessions.length})`;
-        } else {
-            UI_ELEMENTS.historyButton.innerHTML = '📁 No Previous Sessions';
-        }
+
+        await updateHistoryButtonLabel();
+        await checkForRecoveredMeetings();
     } catch (error) {
         console.log('[Session History] Initialization skipped:', error.message);
     }
 }
 
+async function updateHistoryButtonLabel() {
+    const meetings = await captionsDB.getMeetingIndex();
+    UI_ELEMENTS.historyButton.innerHTML = meetings.length > 0
+        ? `📁 View Previous Sessions (${meetings.length})`
+        : '📁 No Previous Sessions';
+}
+
+// Ask the service worker to scan for meetings interrupted by a crash and show
+// a one-time banner for any that haven't been acknowledged yet.
+async function checkForRecoveredMeetings() {
+    try {
+        const response = await chrome.runtime.sendMessage({ message: 'check_recovery' });
+        const recovered = response?.recovered || [];
+        if (recovered.length === 0) return;
+
+        const banner = document.getElementById('recoveryBanner');
+        const bannerText = document.getElementById('recoveryBannerText');
+        const ids = recovered.map(m => m.id);
+
+        bannerText.textContent = recovered.length === 1
+            ? `⚠️ "${recovered[0].title}" was interrupted and has been recovered to history.`
+            : `⚠️ ${recovered.length} interrupted meetings were recovered to history.`;
+        banner.style.display = 'block';
+
+        document.getElementById('dismissRecoveryButton').addEventListener('click', async () => {
+            await captionsDB.acknowledgeRecovered(ids);
+            banner.style.display = 'none';
+        });
+        document.getElementById('viewRecoveredButton').addEventListener('click', async () => {
+            await captionsDB.acknowledgeRecovered(ids);
+            banner.style.display = 'none';
+            window.open(chrome.runtime.getURL('viewer.html') + '?meetingId=' + encodeURIComponent(ids[0]), '_blank');
+        });
+    } catch (error) {
+        console.log('[Session History] Recovery check failed:', error.message);
+    }
+}
+
 async function loadSessionList() {
     try {
-        const sessionManager = new SessionManager();
-        const sessions = await sessionManager.getSessionIndex();
-        const stats = await sessionManager.getStorageStats();
-        
+        const sessions = await captionsDB.getMeetingIndex();
+        const stats = await captionsDB.getStorageStats();
+
         if (!sessions || sessions.length === 0) {
             UI_ELEMENTS.sessionList.innerHTML = '<div style="text-align: center; color: #999;">No saved sessions</div>';
             return;
         }
-        
+
         let html = '';
         for (const session of sessions) {
-            const timeAgo = getTimeAgo(new Date(session.timestamp));
+            const startedAt = new Date(session.startedAt);
+            const timeAgo = getTimeAgo(startedAt);
+            let statusBadge = '';
+            if (session.status === 'recovered') {
+                statusBadge = '<span style="font-size: 10px; background-color: #ffc107; color: #664d03; padding: 1px 6px; border-radius: 8px; margin-left: 6px;">Recovered</span>';
+            } else if (session.status === 'live') {
+                statusBadge = '<span style="font-size: 10px; background-color: #28a745; color: white; padding: 1px 6px; border-radius: 8px; margin-left: 6px;">Live</span>';
+            }
             html += `
                 <div class="session-item" data-id="${session.id}">
-                    <div class="session-title">${escapeHtml(session.title)}</div>
+                    <div class="session-title">${escapeHtml(session.title)}${statusBadge}</div>
                     <div class="session-meta">
-                        <span>${session.date} • ${session.duration} • ${session.captionCount} captions</span>
+                        <span>${startedAt.toLocaleDateString()} • ${session.duration} • ${session.captionCount} captions</span>
                         <span>${session.speakers.length} speakers</span>
                     </div>
                     <div class="session-meta" style="margin-top: 4px;">
@@ -587,11 +608,11 @@ async function loadSessionList() {
                 </div>
             `;
         }
-        
-        // Add storage info
+
+        // Add storage info (real browser quota, typically gigabytes)
         html += `
             <div class="storage-info">
-                Storage: ${stats.usedMB}MB / ${stats.quotaMB}MB (${stats.percentUsed}%)
+                ${stats.meetingCount} meetings • ${stats.usedMB}MB used (${stats.percentUsed}% of ${(stats.quota / (1024 * 1024 * 1024)).toFixed(1)}GB)
                 <button id="clearAllSessions" style="margin-left: 10px; font-size: 11px; color: #dc3545; background: none; border: none; cursor: pointer; text-decoration: underline;">Clear All</button>
             </div>
         `;
@@ -620,44 +641,23 @@ async function loadSessionList() {
 }
 
 async function viewSession(sessionId) {
-    try {
-        const sessionManager = new SessionManager();
-        const sessionData = await sessionManager.loadSession(sessionId);
-        
-        // Store in chrome.storage.local for viewer to access - using the correct key
-        await chrome.storage.local.set({
-            captionsToView: sessionData.transcript,
-            viewerData: {
-                transcriptArray: sessionData.transcript,
-                meetingTitle: sessionData.metadata.title,
-                attendeeReport: sessionData.attendeeReport,
-                isHistorical: true
-            }
-        });
-        
-        // Open viewer
-        window.open(chrome.runtime.getURL('viewer.html'), '_blank');
-        
-    } catch (error) {
-        console.error('[Session History] Failed to view session:', error);
-        alert('Failed to load session. It may have been corrupted.');
-    }
+    // Viewer reads the meeting straight from IndexedDB - no transcript copy needed
+    window.open(chrome.runtime.getURL('viewer.html') + '?meetingId=' + encodeURIComponent(sessionId), '_blank');
 }
 
 async function exportSession(sessionId) {
     try {
-        const sessionManager = new SessionManager();
-        const sessionData = await sessionManager.loadSession(sessionId);
-        
+        const { meta, transcript } = await captionsDB.getMeeting(sessionId);
+
         // Use existing export logic - correct message type
         const format = currentDefaultFormat;
         await chrome.runtime.sendMessage({
             message: "download_captions",  // Fixed: was "save_transcript"
-            transcriptArray: sessionData.transcript,
+            transcriptArray: transcript,
             format: format,
-            meetingTitle: sessionData.metadata.title,
-            attendeeReport: sessionData.attendeeReport,
-            recordingStartTime: sessionData.metadata.timestamp
+            meetingTitle: meta.title,
+            attendeeReport: meta.attendeeReport,
+            recordingStartTime: meta.startedAt
         });
         
         // Visual feedback
@@ -682,11 +682,11 @@ async function exportSession(sessionId) {
 
 async function deleteSession(sessionId) {
     if (!confirm('Delete this session? This cannot be undone.')) return;
-    
+
     try {
-        const sessionManager = new SessionManager();
-        await sessionManager.deleteSession(sessionId);
+        await captionsDB.deleteMeeting(sessionId);
         await loadSessionList(); // Refresh the list
+        await updateHistoryButtonLabel();
     } catch (error) {
         console.error('[Session History] Failed to delete session:', error);
     }
@@ -694,12 +694,11 @@ async function deleteSession(sessionId) {
 
 async function clearAllSessions() {
     if (!confirm('Delete ALL saved sessions? This cannot be undone.')) return;
-    
+
     try {
-        const sessionManager = new SessionManager();
-        await sessionManager.clearAllSessions();
+        await captionsDB.clearAllMeetings();
         UI_ELEMENTS.sessionList.style.display = 'none';
-        UI_ELEMENTS.sessionHistory.style.display = 'none';
+        await updateHistoryButtonLabel();
     } catch (error) {
         console.error('[Session History] Failed to clear sessions:', error);
     }
@@ -723,12 +722,6 @@ function getTimeAgo(date) {
         }
     }
     return 'just now';
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 // --- Initialization ---
@@ -759,24 +752,12 @@ async function initializePopup() {
     } catch (error) {
         // This error is expected when content script isn't loaded yet
         if (error.message.includes("Could not establish connection")) {
+            // Content script isn't loaded (Teams tab predates the extension install
+            // or reload). Injecting it would need the "scripting" permission, which
+            // this extension deliberately doesn't request - a refresh is the fix.
             console.log("Content script not ready. This is normal if the Teams page was just opened.");
-            UI_ELEMENTS.statusMessage.innerHTML = 'Please refresh your Teams tab (F5) to activate the extension.';
-            UI_ELEMENTS.statusMessage.style.color = '#ffc107';
-            
-            // Try to inject the content script if it's not loaded
-            try {
-                await chrome.scripting.executeScript({
-                    target: { tabId: tab.id },
-                    files: ['content_script.js']
-                });
-                console.log("Content script injected successfully. Retrying connection...");
-                // Retry after injection
-                setTimeout(() => initializePopup(), 500);
-            } catch (injectError) {
-                console.log("Could not inject content script:", injectError.message);
-                UI_ELEMENTS.statusMessage.textContent = "Please refresh your Teams tab to activate the extension.";
-                UI_ELEMENTS.statusMessage.style.color = '#dc3545';
-            }
+            UI_ELEMENTS.statusMessage.textContent = "Please refresh your Teams tab (F5) to activate the extension.";
+            UI_ELEMENTS.statusMessage.style.color = '#dc3545';
         } else {
             console.error("Unexpected error:", error.message);
             UI_ELEMENTS.statusMessage.textContent = "Connection error. Please refresh your Teams tab and try again.";
