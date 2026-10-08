@@ -793,4 +793,12 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+// Keep the popup heading in step with manifest.json so it never shows a stale version
+function showExtensionVersion() {
+    const title = document.getElementById('popup-title');
+    const version = chrome.runtime.getManifest().version.replace(/\.0$/, '');
+    if (title) title.textContent = `Teams Captions Saver v${version}`;
+}
+
+document.addEventListener('DOMContentLoaded', showExtensionVersion);
 document.addEventListener('DOMContentLoaded', initializePopup);

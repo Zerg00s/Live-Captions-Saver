@@ -7,7 +7,16 @@ const TIMING = {
 };
 
 const SELECTORS = {
-    CAPTIONS_RENDERER: "[data-tid='closed-caption-v2-window-wrapper'], [data-tid='closed-captions-renderer'], [data-tid*='closed-caption']",
+    // Caption window candidates, tried one at a time in this order. A comma-joined
+    // list would return whichever element comes first in DOM order - in the 2026
+    // captions redesign that is the toolbar's Captions control, not the caption panel.
+    CAPTIONS_RENDERERS: [
+        "[data-tid='closed-caption-renderer-wrapper']",   // 2026 redesign (panel + virtual list)
+        "[data-tid='closed-caption-v2-window-wrapper']",
+        "[data-tid='closed-captions-renderer']"
+    ],
+    // Last resort for unknown layouts; only accepted when it holds caption text
+    CAPTIONS_RENDERER_LOOSE: "[data-tid*='closed-caption']",
     CHAT_MESSAGE: '.fui-ChatMessageCompact',
     AUTHOR: '[data-tid="author"]',
     CAPTION_TEXT: '[data-tid="closed-caption-text"]',
@@ -15,6 +24,8 @@ const SELECTORS = {
         "button[data-tid='hangup-main-btn']",
         "button[data-tid='hangup-leave-button']",
         "button[data-tid='hangup-end-meeting-button']",
+        "button[data-tid='hangup-button']",
+        "button[data-tid='anon-hangup-button']",
         "div#hangup-button button",
         "#hangup-button"
     ].join(','),
@@ -22,6 +33,9 @@ const SELECTORS = {
     MORE_BUTTON_EXPANDED: "button[data-tid='more-button'][aria-expanded='true'], button[id='callingButtons-showMoreBtn'][aria-expanded='true']",
     LANGUAGE_SPEECH_BUTTON: "div[id='LanguageSpeechMenuControl-id']",
     TURN_ON_CAPTIONS_BUTTON: "div[id='closed-captions-button']",
+    // 2026 redesign: one Captions toggle - a toolbar <button> when pinned, otherwise a
+    // menuitemcheckbox in the More menu. data-tid ends in "-on"/"-off" with its state.
+    CAPTIONS_TOGGLE: "[id='closed-captions-button'][data-tid^='closed-captions-button-']",
     // Attendee tracking selectors
     ATTENDEE_TREE: "[role='tree'][aria-label='Attendees']",
     ATTENDEE_ITEM: "[data-tid^='participantsInCall-']",
@@ -121,15 +135,15 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const getCleanTranscript = () => transcriptArray.map(({ key, ...rest }) => rest);
 
 // --- DOM Element Caching ---
-function getCachedElement(selector, expiry = 5000) {
+function getCachedElement(selector, expiry = 5000, resolve = () => document.querySelector(selector)) {
     const now = Date.now();
     const cached = cachedElements.get(selector);
-    
+
     if (cached && (now - cached.timestamp) < expiry && document.contains(cached.element)) {
         return cached.element;
     }
-    
-    const element = document.querySelector(selector);
+
+    const element = resolve();
     if (element) {
         cachedElements.set(selector, { element, timestamp: now });
     }
@@ -140,11 +154,29 @@ function clearElementCache() {
     cachedElements.clear();
 }
 
-const isUserInMeeting = () => getCachedElement(SELECTORS.LEAVE_BUTTONS) !== null;
+function findCaptionsContainer() {
+    for (const selector of SELECTORS.CAPTIONS_RENDERERS) {
+        const element = document.querySelector(selector);
+        if (element) return element;
+    }
+    // Unknown layout: take the outermost loose match that wraps real caption text
+    const text = document.querySelector(SELECTORS.CAPTION_TEXT);
+    let container = null;
+    for (let el = text?.parentElement; el; el = el.parentElement) {
+        if (el.matches(SELECTORS.CAPTIONS_RENDERER_LOOSE)) container = el;
+    }
+    return container;
+}
+
+const getCaptionsContainer = () => getCachedElement('captions-container', 5000, findCaptionsContainer);
+
+// Captions only render inside a call, so a caption window also proves we are in a
+// meeting - this keeps capture working if Teams renames the Leave button again.
+const isUserInMeeting = () => getCachedElement(SELECTORS.LEAVE_BUTTONS) !== null || getCaptionsContainer() !== null;
 
 // --- Core Logic ---
 const processCaptionUpdates = ErrorHandler.wrap(function() {
-    const closedCaptionsContainer = getCachedElement(SELECTORS.CAPTIONS_RENDERER);
+    const closedCaptionsContainer = getCaptionsContainer();
     if (!closedCaptionsContainer) return;
 
     const transcriptElements = closedCaptionsContainer.querySelectorAll(SELECTORS.CHAT_MESSAGE);
@@ -521,7 +553,7 @@ const handleCaptionsStateChange = ErrorHandler.wrap(async function() {
         return;
     }
     
-    const captionsContainer = getCachedElement(SELECTORS.CAPTIONS_RENDERER);
+    const captionsContainer = getCaptionsContainer();
     if (captionsContainer) {
         startCaptureSession();
     } else {
@@ -538,7 +570,7 @@ const handleCaptionsStateChange = ErrorHandler.wrap(async function() {
 function ensureObserverIsActive() {
     if (!capturing) return;
 
-    const captionContainer = getCachedElement(SELECTORS.CAPTIONS_RENDERER);
+    const captionContainer = getCaptionsContainer();
     
     // If the container doesn't exist or has changed, re-initialize the observer
     if (!captionContainer || captionContainer !== observedElement) {
@@ -850,6 +882,13 @@ async function attemptAutoEnableCaptions() {
     
     try {
         console.log("Starting auto-enable captions attempt...");
+
+        // Redesign with Captions pinned to the toolbar: one click, no menu
+        const pinnedToggle = document.querySelector(SELECTORS.CAPTIONS_TOGGLE);
+        if (pinnedToggle) {
+            clickCaptionsToggle(pinnedToggle);
+            return;
+        }
         
         const moreButton = getCachedElement(SELECTORS.MORE_BUTTON);
         if (!moreButton) {
@@ -867,6 +906,19 @@ async function attemptAutoEnableCaptions() {
             console.log("More menu already expanded, proceeding...");
         }
 
+        // Redesign: Captions sits directly in the More menu
+        const menuToggle = document.querySelector(SELECTORS.CAPTIONS_TOGGLE);
+        if (menuToggle) {
+            clickCaptionsToggle(menuToggle);
+            await delay(TIMING.BUTTON_CLICK_DELAY);
+            const stillExpanded = getCachedElement(SELECTORS.MORE_BUTTON_EXPANDED);
+            if (stillExpanded) {
+                stillExpanded.click();
+            }
+            return;
+        }
+
+        // Classic Teams: More > Language and speech > Turn on live captions
         const langAndSpeechButton = getCachedElement(SELECTORS.LANGUAGE_SPEECH_BUTTON);
         if (!langAndSpeechButton) {
             console.error("Auto-enable FAILED: Could not find 'Language and speech' menu item.");
@@ -904,6 +956,20 @@ async function attemptAutoEnableCaptions() {
     } finally {
         autoEnableInProgress = false;
     }
+}
+
+// Clicks the redesign's Captions toggle unless it already reports captions on -
+// clicking it then would turn captions off.
+function clickCaptionsToggle(toggle) {
+    const isOn = toggle.getAttribute('data-tid') === 'closed-captions-button-on' ||
+        toggle.getAttribute('aria-checked') === 'true' ||
+        toggle.getAttribute('aria-pressed') === 'true';
+    if (isOn) {
+        console.log("Captions toggle already on; nothing to click.");
+        return;
+    }
+    console.log("Clicking Captions toggle...");
+    toggle.click();
 }
 
 function debouncedAutoEnableCaptions() {

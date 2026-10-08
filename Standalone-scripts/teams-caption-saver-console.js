@@ -48,8 +48,16 @@
 
     // --- CORE LOGIC ---
     const SELECTORS = {
-        // Updated to match the extension's selectors
-        CAPTIONS_RENDERER: "[data-tid='closed-caption-v2-window-wrapper'], [data-tid='closed-captions-renderer'], [data-tid*='closed-caption']",
+        // Caption window candidates, tried one at a time in this order. A comma-joined
+        // list would return whichever element comes first in DOM order - in the 2026
+        // captions redesign that is the toolbar's Captions control, not the caption panel.
+        CAPTIONS_RENDERERS: [
+            "[data-tid='closed-caption-renderer-wrapper']",   // 2026 redesign (panel + virtual list)
+            "[data-tid='closed-caption-v2-window-wrapper']",
+            "[data-tid='closed-captions-renderer']"
+        ],
+        // Last resort for unknown layouts; only accepted when it holds caption text
+        CAPTIONS_RENDERER_LOOSE: "[data-tid*='closed-caption']",
         CHAT_MESSAGE: '.fui-ChatMessageCompact',
         AUTHOR: '[data-tid="author"]',
         CAPTION_TEXT: '[data-tid="closed-caption-text"]',
@@ -74,6 +82,20 @@
         ATTENDEE_ITEM: "[data-tid^='participantsInCall-']",
         ATTENDEE_NAME: "[id^='roster-avatar-img-']"
     };
+
+    function findCaptionsContainer() {
+        for (const selector of SELECTORS.CAPTIONS_RENDERERS) {
+            const element = document.querySelector(selector);
+            if (element) return element;
+        }
+        // Unknown layout: take the outermost loose match that wraps real caption text
+        const text = document.querySelector(SELECTORS.CAPTION_TEXT);
+        let container = null;
+        for (let el = text?.parentElement; el; el = el.parentElement) {
+            if (el.matches(SELECTORS.CAPTIONS_RENDERER_LOOSE)) container = el;
+        }
+        return container;
+    }
 
     // --- ATTENDEE TRACKING ---
     function trackAttendees() {
@@ -190,7 +212,7 @@
 
     // --- ENHANCED CAPTION PROCESSING WITH DEBOUNCING ---
     function processCaptionUpdates() {
-        const container = document.querySelector(SELECTORS.CAPTIONS_RENDERER);
+        const container = findCaptionsContainer();
         if (!container) return;
         
         container.querySelectorAll(SELECTORS.CHAT_MESSAGE).forEach(element => {
@@ -291,7 +313,7 @@
 
     function ensureObserverIsActive() {
         if (!capturing) return;
-        const captionContainer = document.querySelector(SELECTORS.CAPTIONS_RENDERER);
+        const captionContainer = findCaptionsContainer();
         if (!captionContainer || captionContainer !== observedElement) {
             if (observer) observer.disconnect();
             if (captionContainer) {
@@ -429,7 +451,7 @@
             
             // Verify captions are now enabled
             await delay(1000);
-            if (document.querySelector(SELECTORS.CAPTIONS_RENDERER)) {
+            if (findCaptionsContainer()) {
                 console.log("✅ Captions successfully enabled!");
                 if (statusEl) {
                     statusEl.textContent = `✅ Captions enabled!`;
@@ -968,8 +990,8 @@
 
     // --- MAIN LOOP & CLEANUP ---
     async function main() {
-        const inMeeting = !!document.querySelector(SELECTORS.LEAVE_BUTTONS);
-        const captionsOn = !!document.querySelector(SELECTORS.CAPTIONS_RENDERER);
+        const inMeeting = !!document.querySelector(SELECTORS.LEAVE_BUTTONS) || !!findCaptionsContainer();
+        const captionsOn = !!findCaptionsContainer();
 
         if (inMeeting) {
             if (captionsOn) {

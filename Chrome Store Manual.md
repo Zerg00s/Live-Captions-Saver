@@ -2,7 +2,7 @@
 
 - Navigate to [Chrome Developer Dashboard.](https://chrome.google.com/webstore/devconsole)
 - Click the Extension
-- Upload new package
-- Click Choose file > your zip file > Upload. If your item's manifest and ZIP file are valid, you can edit your item on the next page.
+- Package > Upload new package
+- Click Select file > your zip file > Upload. If your item's manifest and ZIP file are valid, you can edit your item on the next page.
 - Submit for review
 - Done

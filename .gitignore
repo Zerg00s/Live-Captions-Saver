@@ -4,3 +4,6 @@ teams-captions-saver.pem
 .claude
 CLAUDE.md
 /CLAUDE.md
+
+# Local troubleshooting scripts (not shipped)
+/Debug/
