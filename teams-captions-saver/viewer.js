@@ -24,10 +24,22 @@ document.addEventListener('DOMContentLoaded', () => {
     let updateTimer = null;
 
     // --- Utility ---
+    // Escapes quotes too: the result also goes into attributes such as data-speaker.
     function escapeHtml(str) {
-        const p = document.createElement("p");
-        p.textContent = str;
-        return p.innerHTML;
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    // Same result as element.innerHTML = html, but parsed with DOMParser so the markup
+    // never runs scripts and Firefox's add-on linter doesn't flag it. Callers escape
+    // any user-supplied text with escapeHtml() first.
+    function setHTML(element, html) {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        element.replaceChildren(...doc.body.childNodes);
     }
     
     // --- Helper Functions ---
@@ -73,7 +85,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Append to DOM
         const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = newCaptionHTML;
+        setHTML(tempDiv, newCaptionHTML);
         const newCaptionElement = tempDiv.firstElementChild;
         captionsContainer.appendChild(newCaptionElement);
         
@@ -222,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderCaptions(transcriptArray) {
         allCaptions = transcriptArray;
         const htmlContent = transcriptArray.map(createCaptionHTML).join('');
-        captionsContainer.innerHTML = htmlContent || '<p class="status-message">No captions to display.</p>';
+        setHTML(captionsContainer, htmlContent || '<p class="status-message">No captions to display.</p>');
         updateExportButtonStates();
     }
 
@@ -425,11 +437,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const originalHtml = button.innerHTML;
         button.classList.add('success');
         const svg = button.querySelector('svg');
-        button.innerHTML = `${svg.outerHTML}${successText}`;
+        setHTML(button, `${svg.outerHTML}${successText}`);
         
         setTimeout(() => {
             button.classList.remove('success');
-            button.innerHTML = originalHtml;
+            setHTML(button, originalHtml);
         }, 2000);
     }
     
@@ -547,7 +559,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 `;
             }
 
-            sessionListModal.innerHTML = html;
+            setHTML(sessionListModal, html);
 
             // MV3 CSP forbids inline onclick handlers - attach real listeners
             sessionListModal.querySelectorAll('.session-item').forEach(item => {
@@ -573,7 +585,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Update title
             const suffix = meta.status === 'recovered' ? '(Recovered)' : '(Historical)';
-            document.querySelector('h1').innerHTML = `${escapeHtml(meta.title)} <span style="font-size: 0.5em; color: #666;">${suffix}</span>`;
+            setHTML(document.querySelector('h1'), `${escapeHtml(meta.title)} <span style="font-size: 0.5em; color: #666;">${suffix}</span>`);
             
             // Calculate and display analytics
             const analytics = calculateAnalytics(allCaptions);
@@ -628,7 +640,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 isLiveStreaming = false;
 
                 const suffix = meta.status === 'recovered' ? '(Recovered)' : '(Historical)';
-                document.querySelector('h1').innerHTML = `${escapeHtml(meta.title)} <span style="font-size: 0.5em; color: #666;">${suffix}</span>`;
+                setHTML(document.querySelector('h1'), `${escapeHtml(meta.title)} <span style="font-size: 0.5em; color: #666;">${suffix}</span>`);
 
                 const analytics = calculateAnalytics(transcript);
                 if (analytics) {
@@ -710,7 +722,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ? 'The transcript has been auto-saved.'
             : 'The transcript is ready to save.';
             
-        endedMessage.innerHTML = `<strong>Meeting Ended</strong><br><span style="font-size: 14px;">${subtext}</span>`;
+        setHTML(endedMessage, `<strong>Meeting Ended</strong><br><span style="font-size: 14px;">${subtext}</span>`);
         
         captionsContainer.appendChild(endedMessage);
         
@@ -930,13 +942,13 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (analyticsContainer) {
             // Update existing analytics
-            analyticsContainer.innerHTML = analyticsHTML;
+            setHTML(analyticsContainer, analyticsHTML);
         } else {
             // Create new analytics container
             analyticsContainer = document.createElement('div');
             analyticsContainer.id = 'meeting-analytics';
             analyticsContainer.style.cssText = 'background: #f8f9fa; padding: 15px; margin-bottom: 20px; border-radius: 8px; border: 1px solid #dee2e6;';
-            analyticsContainer.innerHTML = analyticsHTML;
+            setHTML(analyticsContainer, analyticsHTML);
             container.parentNode.insertBefore(analyticsContainer, container);
         }
     }

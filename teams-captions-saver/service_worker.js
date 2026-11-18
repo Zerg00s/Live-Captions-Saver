@@ -1,4 +1,8 @@
-importScripts('idbStorage.js');
+// Chrome runs this file as a service worker; Firefox runs it as an event page that
+// loads idbStorage.js itself (see manifest background.scripts), so importScripts is absent there.
+if (typeof importScripts === 'function') {
+    importScripts('idbStorage.js');
+}
 
 // --- Utility Functions ---
 function getSanitizedMeetingName(fullTitle) {
@@ -166,7 +170,15 @@ function escapeHtml(str) {
 
 // --- Core Actions ---
 async function downloadFile(filename, content, mimeType, saveAs) {
-    const url = `data:${mimeType};charset=utf-8,${encodeURIComponent(content)}`;
+    // Firefox rejects data: URLs in downloads.download, but its event page can make
+    // blob URLs. Chrome's service worker has no URL.createObjectURL, so it keeps data: URLs.
+    let url;
+    if (typeof URL.createObjectURL === 'function') {
+        url = URL.createObjectURL(new Blob([content], { type: `${mimeType};charset=utf-8` }));
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } else {
+        url = `data:${mimeType};charset=utf-8,${encodeURIComponent(content)}`;
+    }
     chrome.downloads.download({
         url: url,
         filename: filename,

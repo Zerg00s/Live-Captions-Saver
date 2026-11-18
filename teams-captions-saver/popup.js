@@ -58,6 +58,14 @@ function escapeHtml(str) {
         .replace(/'/g, "&#039;");
 }
 
+// Same result as element.innerHTML = html, but parsed with DOMParser so the markup
+// never runs scripts and Firefox's add-on linter doesn't flag it. Callers escape
+// any user-supplied text with escapeHtml() first.
+function setHTML(element, html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    element.replaceChildren(...doc.body.childNodes);
+}
+
 async function getActiveTeamsTab() {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const teamsTab = tabs.find(tab => 
@@ -155,10 +163,10 @@ async function renderSpeakerAliases(tab) {
         response.speakers.forEach(speaker => {
             const item = document.createElement('div');
             item.className = 'alias-item';
-            item.innerHTML = `
+            setHTML(item, `
                 <label title="${escapeHtml(speaker)}">${escapeHtml(speaker)}</label>
                 <input type="text" data-original-name="${escapeHtml(speaker)}" placeholder="Enter alias..." value="${escapeHtml(speakerAliases[speaker] || '')}">
-            `;
+            `);
             speakerAliasList.appendChild(item);
         });
     } catch (error) {
@@ -534,9 +542,9 @@ async function initializeSessionHistory() {
 
 async function updateHistoryButtonLabel() {
     const meetings = await captionsDB.getMeetingIndex();
-    UI_ELEMENTS.historyButton.innerHTML = meetings.length > 0
+    setHTML(UI_ELEMENTS.historyButton, meetings.length > 0
         ? `📁 View Previous Sessions (${meetings.length})`
-        : '📁 No Previous Sessions';
+        : '📁 No Previous Sessions');
 }
 
 // Ask the service worker to scan for meetings interrupted by a crash and show
@@ -591,7 +599,7 @@ async function loadSessionList() {
                 statusBadge = '<span style="font-size: 10px; background-color: #28a745; color: white; padding: 1px 6px; border-radius: 8px; margin-left: 6px;">Live</span>';
             }
             html += `
-                <div class="session-item" data-id="${session.id}">
+                <div class="session-item" data-id="${escapeHtml(session.id)}">
                     <div class="session-title">${escapeHtml(session.title)}${statusBadge}</div>
                     <div class="session-meta">
                         <span>${startedAt.toLocaleDateString()} • ${session.duration} • ${session.captionCount} captions</span>
@@ -601,9 +609,9 @@ async function loadSessionList() {
                         <span style="font-size: 11px; color: #888;">${timeAgo}</span>
                     </div>
                     <div class="session-actions">
-                        <button class="session-btn view-btn" data-id="${session.id}">View</button>
-                        <button class="session-btn export-btn" data-id="${session.id}">Export</button>
-                        <button class="session-btn delete" data-id="${session.id}">Delete</button>
+                        <button class="session-btn view-btn" data-id="${escapeHtml(session.id)}">View</button>
+                        <button class="session-btn export-btn" data-id="${escapeHtml(session.id)}">Export</button>
+                        <button class="session-btn delete" data-id="${escapeHtml(session.id)}">Delete</button>
                     </div>
                 </div>
             `;
@@ -617,7 +625,7 @@ async function loadSessionList() {
             </div>
         `;
         
-        UI_ELEMENTS.sessionList.innerHTML = html;
+        setHTML(UI_ELEMENTS.sessionList, html);
         
         // Add event listeners for session actions
         document.querySelectorAll('.view-btn').forEach(btn => {
@@ -724,6 +732,32 @@ function getTimeAgo(date) {
     return 'just now';
 }
 
+// Returns true when the extension may run on the Teams tab's site. Otherwise shows
+// a "Grant access" button (permissions.request needs a user click) and returns false.
+async function ensureHostAccess(tab) {
+    let origin;
+    try {
+        origin = new URL(tab.url).origin + '/*';
+        if (await chrome.permissions.contains({ origins: [origin] })) return true;
+    } catch (error) {
+        return true; // Permissions API unavailable or odd URL - fall through to the normal path.
+    }
+
+    const { statusMessage } = UI_ELEMENTS;
+    statusMessage.textContent = 'This extension needs access to Teams to read captions. ';
+    statusMessage.style.color = '#dc3545';
+    const grantButton = document.createElement('button');
+    grantButton.textContent = 'Grant access';
+    grantButton.addEventListener('click', async () => {
+        const granted = await chrome.permissions.request({ origins: [origin] });
+        statusMessage.textContent = granted
+            ? 'Access granted. Please refresh your Teams tab (F5).'
+            : 'Access not granted. The extension cannot read captions without it.';
+    });
+    statusMessage.appendChild(grantButton);
+    return false;
+}
+
 // --- Initialization ---
 async function initializePopup() {
     await loadSettings();
@@ -737,6 +771,10 @@ async function initializePopup() {
         UI_ELEMENTS.statusMessage.style.color = '#dc3545';
         return;
     }
+
+    // Firefox lets users withhold site access per site; without it the content
+    // script never runs. Chrome grants host_permissions at install, so this is a no-op there.
+    if (!(await ensureHostAccess(tab))) return;
 
     try {
         const status = await chrome.tabs.sendMessage(tab.id, { message: "get_status" });

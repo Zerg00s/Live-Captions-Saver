@@ -7,3 +7,6 @@ CLAUDE.md
 
 # Local troubleshooting scripts (not shipped)
 /Debug/
+
+# Browser builds (node build.js)
+/dist/

@@ -2,7 +2,7 @@
 
 # MS Teams Live Captions Saver Browser Extension v5.0.0
 
-The MS Teams Live Captions Saver is a powerful Chrome extension that captures, saves, and analyzes live captions from Microsoft Teams meetings. With advanced features like AI-powered summaries, speaker tracking, attendee monitoring, and automated exports, it's the perfect tool for meeting documentation and accessibility.
+The MS Teams Live Captions Saver is a powerful browser extension for Chrome, Edge, Brave and Firefox that captures, saves, and analyzes live captions from Microsoft Teams meetings. With advanced features like AI-powered summaries, speaker tracking, attendee monitoring, and automated exports, it's the perfect tool for meeting documentation and accessibility.
 
 ## Key Features
 
@@ -21,9 +21,12 @@ The MS Teams Live Captions Saver is a powerful Chrome extension that captures, s
 - **Customizable Filename Patterns** - Use variables like {date}, {time}, {title}, {attendees}
 - **Multiple Timestamp Formats** - Choose between 12-hour, 24-hour, or relative timestamps
 
-## Install from the Chrome Store
+## Install
 
-[MS Teams Live Captions Saver - Chrome Web Store](https://chromewebstore.google.com/detail/ms-teams-live-captions-sa/ffjfmokaelmhincapcajcnaoelgmpoih)
+- Chrome, Edge and Brave: [MS Teams Live Captions Saver - Chrome Web Store](https://chromewebstore.google.com/detail/ms-teams-live-captions-sa/ffjfmokaelmhincapcajcnaoelgmpoih)
+- Firefox and Zen: [MS Teams Live Captions Saver - Firefox Add-ons](https://addons.mozilla.org/firefox/addon/ms-teams-live-captions-saver/)
+
+[<img src="IMG/firefox-addons.png" alt="Get it on Firefox Add-ons" height="60">](https://addons.mozilla.org/firefox/addon/ms-teams-live-captions-saver/)
 
 ## Quick Start
 
@@ -140,6 +143,15 @@ Includes special formatting and instructions for AI analysis:
 4. Click **"Load unpacked"**
 5. Select the `teams-captions-saver` directory
 
+### Firefox and Zen
+
+1. Run `node build.js` in the repository root. It creates `dist/firefox/`.
+2. Open `about:debugging` and choose **This Firefox**.
+3. Click **Load Temporary Add-on** and select `dist/firefox/manifest.json`.
+4. Reload your Teams tab.
+
+Firefox removes temporary add-ons when it restarts. For a permanent install, use the Firefox Add-ons store.
+
 ## Contributing
 
 We welcome contributions! To get started:
@@ -151,13 +163,14 @@ We welcome contributions! To get started:
 5. Submit a pull request
 
 ### Development Setup
-- No build system required - pure JavaScript/HTML/CSS
+- Pure JavaScript/HTML/CSS, no bundler. Chrome loads `teams-captions-saver/` directly.
+- `node build.js` creates the store packages for Chrome and Firefox in `dist/`. See `Store Publishing Manual.md`.
 - Test with actual Teams meetings (captions must be enabled)
 - Update version in `manifest.json` for releases
 
 ## Requirements
 
-- Chrome, Edge, or Brave browser
+- Chrome, Edge, Brave, or Firefox 140+ (including Zen)
 - Microsoft Teams web version (teams.microsoft.com)
 - Live captions must be enabled in Teams meeting
 - Extension works only during active meetings
@@ -212,13 +225,9 @@ This project is provided "as is" without warranty. Users are responsible for com
 
 - Special thanks to all contributors and users providing feedback
 
-### Publish New Extension Version to the Chrome Web Store
+### Publishing a New Version
 
-- Navigate to [Chrome Developer Dashboard.](https://chrome.google.com/webstore/devconsole)
-- Click on the extension you want to update.
-- Click the Package > Upload new package.
-
-- Click Choose file > your zip file > Upload. If your item's manifest and ZIP file are valid, you can edit your item on the next page.
+See [Store Publishing Manual.md](Store%20Publishing%20Manual.md) for the steps to release to the Chrome Web Store and Firefox Add-ons.
 
 ## Support
 
