@@ -26,7 +26,7 @@ The MS Teams Live Captions Saver is a powerful browser extension for Chrome, Edg
 - Chrome, Edge and Brave: [MS Teams Live Captions Saver - Chrome Web Store](https://chromewebstore.google.com/detail/ms-teams-live-captions-sa/ffjfmokaelmhincapcajcnaoelgmpoih)
 - Firefox and Zen: [MS Teams Live Captions Saver - Firefox Add-ons](https://addons.mozilla.org/firefox/addon/ms-teams-live-captions-saver/)
 
-[<img src="IMG/firefox-addons.png" alt="Get it on Firefox Add-ons" height="60">](https://addons.mozilla.org/firefox/addon/ms-teams-live-captions-saver/)
+[<img src="IMG/chrome-web-store.png" alt="Available in the Chrome Web Store" height="60">](https://chromewebstore.google.com/detail/ms-teams-live-captions-sa/ffjfmokaelmhincapcajcnaoelgmpoih)&nbsp;&nbsp;&nbsp;[<img src="IMG/firefox-addons.png" alt="Get it on Firefox Add-ons" height="60">](https://addons.mozilla.org/firefox/addon/ms-teams-live-captions-saver/)
 
 ## Quick Start
 
